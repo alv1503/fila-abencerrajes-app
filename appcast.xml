@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
-    <title>Filà Abencerrajes App</title>
+    <title>Filà Abencerrajes App Updates</title>
+    
+    <item>
+      <title>Versión 1.0.1</title>
+      <description>Iconos reorganizados y mejoras visuales.</description>
+      <pubDate>Mon, 24 Nov 2025 18:00:00 +0000</pubDate>
+      <enclosure url="https://github.com/alv1503/fila-abencerrajes-app/releases/download/v.0.9.1/app-release.apk" sparkle:version="1.0.1+2" sparkle:os="android" />
+    </item>
+
     <item>
       <title>Versión 1.0.0</title>
-      <description>
-        ¡Bienvenido a la App Oficial!
-        - Gestión de eventos y tickets.
-        - Votaciones y música.
-        - ¡Y mucho más!
-      </description>
-      <pubDate>Mon, 21 Nov 2025 12:00:00 +0000</pubDate>
-      <enclosure url="https://github.com/alv1503/fila-abencerrajes-app/releases/download/v0.9.0/app-release.apk" sparkle:version="1.0.0" sparkle:os="android" />
+      <description>Lanzamiento inicial</description>
+      <enclosure url="..." sparkle:version="1.0.0+1" sparkle:os="android" />
     </item>
+
   </channel>
 </rss>
