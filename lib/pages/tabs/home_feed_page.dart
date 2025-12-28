@@ -5,7 +5,6 @@ import 'package:abenceapp/models/voting_model.dart';
 import 'package:abenceapp/pages/details/event_detail_page.dart';
 import 'package:abenceapp/pages/details/voting_detail_page.dart';
 import 'package:abenceapp/pages/forms/create_announcement_page.dart';
-import 'package:abenceapp/pages/forms/create_event_page.dart'; // NECESSARI PER A CREAR EVENT
 import 'package:abenceapp/services/firestore_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -15,7 +14,14 @@ import 'package:abenceapp/utils/icon_helper.dart';
 import 'package:abenceapp/pages/docs/documents_page.dart';
 import 'package:abenceapp/pages/extras/music_library_page.dart';
 import 'package:abenceapp/pages/extras/order_sheets_page.dart';
-import 'package:abenceapp/pages/extras/tickets_page.dart'; // IMPORT TICKETS
+import 'package:abenceapp/pages/extras/tickets_page.dart';
+
+// --- IMPORTS DE ACTUALIZACIONES ---
+import 'package:upgrader/upgrader.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+// Si tens problemes amb Version, assegura't que tens el paquet 'version' instal·lat
+// i descomenta la línia de sota. Si no, usa el package_info_plus o Strings.
+import 'package:version/version.dart';
 
 class HomeFeedPage extends StatefulWidget {
   const HomeFeedPage({super.key});
@@ -72,103 +78,149 @@ class _HomeFeedPageState extends State<HomeFeedPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(''),
-        actions: [
-          // 1. AVISOS (Només Admin)
-          if (_isAdmin)
-            IconButton(
-              icon: const Icon(Icons.campaign, color: Colors.orangeAccent),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const CreateAnnouncementPage(),
-                ),
-              ),
-            ),
+    final appcastURL =
+        'https://raw.githubusercontent.com/alv1503/fila-abencerrajes-app/main/appcast.xml';
 
-          // 2. CREAR EVENT (ARA PER A TOTS - CAMBI 1)
-          IconButton(
-            icon: const Icon(
-              Icons.add_circle_outline,
-              color: Colors.blueAccent,
-            ), // Icona destacada
-            tooltip: 'Crear Event',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const CreateEventPage()),
-            ),
-          ),
-
-          // 3. TICKETS / PAGAMENTS (NOU - CAMBI 2)
-          IconButton(
-            icon: const Icon(Icons.receipt_long, color: Colors.green),
-            tooltip: 'Tickets i Comptes',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const TicketsPage()),
-            ),
-          ),
-
-          // 4. ALTRES
-          IconButton(
-            icon: const Icon(Icons.shopping_bag_outlined),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const OrderSheetsListPage(),
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.music_note),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const MusicLibraryPage()),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.folder_copy_outlined),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const DocumentsPage()),
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
+    final upgrader = Upgrader(
+      storeController: UpgraderStoreController(
+        onAndroid: () => UpgraderAppcastStore(
+          appcastURL: appcastURL,
+          osVersion: Version.parse('0.0.0'),
+        ),
+        oniOS: () => UpgraderAppcastStore(
+          appcastURL: appcastURL,
+          osVersion: Version.parse('0.0.0'),
+        ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildBulletinBoard(),
-            const SizedBox(height: 24),
-            const Text(
-              'Pròxims Esdeveniments',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            _buildEventsList(),
-            const SizedBox(height: 30),
-            const Text(
-              'Votacions Actives',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            _buildVotingsList(),
-          ],
+      debugLogging: true,
+      messages: UpgraderMessages(code: 'es'),
+    );
+
+    return UpgradeAlert(
+      upgrader: upgrader,
+      child: Scaffold(
+        appBar: AppBar(
+          // Usem el title per a fer la distribució personalitzada
+          // Deixem leading i actions buits per a tenir control total del Row
+          automaticallyImplyLeading: false,
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // --- GRUP ESQUERRA: UTILITATS DE PAGAMENT/COMANDES ---
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.receipt_long, color: Colors.green),
+                    tooltip: 'Tickets',
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const TicketsPage(),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.shopping_bag_outlined),
+                    tooltip: 'Encàrrecs',
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const OrderSheetsListPage(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              // --- GRUP DRETA: MÚSICA I DOCUMENTS ---
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.music_note),
+                    tooltip: 'Música',
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const MusicLibraryPage(),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.folder_copy_outlined),
+                    tooltip: 'Docs',
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const DocumentsPage(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Passem _isAdmin per a mostrar el botó de crear notícia ací
+              _buildBulletinBoardHeader(),
+              const SizedBox(height: 10),
+              _buildBulletinBoardList(),
+
+              const SizedBox(height: 24),
+
+              const Text(
+                'Pròxims Esdeveniments',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              _buildEventsList(),
+
+              const SizedBox(height: 30),
+
+              const Text(
+                'Votacions Actives',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              _buildVotingsList(),
+            ],
+          ),
         ),
       ),
     );
   }
 
   // --- WIDGETS AUXILIARES ---
-  // (COPIA ELS MATEIXOS DE LA VERSIÓ ANTERIOR: _buildBulletinBoard, _buildEventsList, ETC.)
-  // Si els necessites de nou, demana-m'ho, però són exactament els mateixos de l'últim missatge.
 
-  Widget _buildBulletinBoard() {
+  // NOU HEADER: Títol + Botó de crear notícia (Només Admin)
+  Widget _buildBulletinBoardHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        const Text(
+          'Taulell d\'Anuncis',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        if (_isAdmin)
+          IconButton(
+            icon: const Icon(Icons.add_circle, color: Colors.orangeAccent),
+            tooltip: "Afegir Notícia",
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const CreateAnnouncementPage(),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildBulletinBoardList() {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestoreService.getAnnouncementsStream(),
       builder: (context, snapshot) {
@@ -178,27 +230,12 @@ class _HomeFeedPageState extends State<HomeFeedPage> {
           final announcements = snapshot.data!.docs
               .map((doc) => AnnouncementModel.fromJson(doc))
               .toList();
-          for (var notice in announcements) {
-            cards.add(_buildNoticeCard(notice));
-          }
+          for (var notice in announcements) cards.add(_buildNoticeCard(notice));
         }
         if (cards.isEmpty) return const SizedBox.shrink();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Taulell d\'Anuncis',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 140,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: cards,
-              ),
-            ),
-          ],
+        return SizedBox(
+          height: 140,
+          child: ListView(scrollDirection: Axis.horizontal, children: cards),
         );
       },
     );
@@ -333,9 +370,8 @@ class _HomeFeedPageState extends State<HomeFeedPage> {
       child: StreamBuilder<QuerySnapshot>(
         stream: _firestoreService.getUpcomingEventsStream(limit: 4),
         builder: (context, snapshot) {
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
             return _buildEmptyCard("No hi ha esdeveniments.");
-          }
           final events = snapshot.data!.docs
               .map((doc) => EventModel.fromJson(doc))
               .toList();
@@ -371,9 +407,8 @@ class _HomeFeedPageState extends State<HomeFeedPage> {
       child: StreamBuilder<QuerySnapshot>(
         stream: _firestoreService.getUpcomingVotingsStream(limit: 4),
         builder: (context, snapshot) {
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
             return _buildEmptyCard("No hi ha votacions actives.");
-          }
           final votings = snapshot.data!.docs
               .map((doc) => VotingModel.fromJson(doc))
               .toList();
@@ -423,7 +458,7 @@ class _HomeFeedPageState extends State<HomeFeedPage> {
           color: Theme.of(context).cardColor,
           image: hasImage
               ? DecorationImage(
-                  image: NetworkImage(imageUrl),
+                  image: NetworkImage(imageUrl!),
                   fit: BoxFit.cover,
                   colorFilter: ColorFilter.mode(
                     Colors.black.withOpacity(0.6),
@@ -480,9 +515,10 @@ class _HomeFeedPageState extends State<HomeFeedPage> {
     );
   }
 
-  Widget _buildEmptyCard(String text) {
+  Widget _buildEmptyCard(String text, {bool isHorizontal = true}) {
     return Container(
-      width: double.infinity,
+      width: isHorizontal ? double.infinity : null,
+      height: isHorizontal ? 100 : null,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.grey[900],
