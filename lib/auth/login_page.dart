@@ -1,6 +1,8 @@
 // lib/auth/login_page.dart
 import 'package:abenceapp/services/auth_service.dart';
 import 'package:flutter/material.dart';
+import 'package:abenceapp/auth/activate_account_page.dart';
+import 'package:abenceapp/auth/auth_gate.dart'; // <--- IMPORTANTE: Necesario para la redirección
 
 /// La pàgina d'inici de sessió.
 ///
@@ -49,12 +51,19 @@ class _LoginPageState extends State<LoginPage> {
     try {
       // Intenta iniciar sessió amb el servei d'autenticació.
       await _authService.signInWithEmailPassword(
-        _emailController.text,
-        _passwordController.text,
+        _emailController.text.trim(), // Afegit trim() per seguretat
+        _passwordController.text.trim(),
       );
-      // Si tenim èxit, no cal fer res més.
-      // L'[AuthGate] (que està escoltant) detectarà el canvi d'estat
-      // i navegarà automàticament a la [HomePage].
+
+      // --- CANVI CLAU: Redirecció forçada ---
+      if (mounted) {
+        // Forzamos la navegación a la puerta principal (AuthGate)
+        // Usamos pushAndRemoveUntil para borrar el historial y que no puedan volver atrás
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const AuthGate()),
+          (route) => false,
+        );
+      }
     } catch (e) {
       // Captura qualsevol error que ocórrega durant el login.
       // Revisa si el widget encara està "muntat" (visible)
@@ -62,7 +71,8 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         // Personalitzem el missatge d'error segons el codi de Firebase.
         String errorMessage = 'Error en iniciar sessió';
-        if (e.toString().contains('INVALID_LOGIN_CREDENTIALS')) {
+        if (e.toString().contains('INVALID_LOGIN_CREDENTIALS') ||
+            e.toString().contains('invalid-credential')) {
           errorMessage = 'Email o contrasenya incorrectes.';
         } else if (e.toString().contains('invalid-email')) {
           errorMessage = 'El format de l\'email no és vàlid.';
@@ -75,16 +85,16 @@ class _LoginPageState extends State<LoginPage> {
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
-      }
-    } finally {
-      // El bloc 'finally' s'executa sempre, tant si hi ha èxit com si hi ha error.
-      // Ens assegurem de desactivar l'indicador de càrrega.
-      if (mounted) {
+
+        // Si falla, llevem la càrrega perquè puguen tornar a intentar-ho
         setState(() {
           _isLoading = false;
         });
       }
     }
+    // Nota: He llevat el 'finally' per a evitar conflictes amb la navegació
+    // Si tot va bé, canviem de pantalla i no cal fer setState(false).
+    // Si va malament, el catch ja fa el setState(false).
   }
 
   @override
@@ -127,15 +137,20 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 16),
 
-              // Camp de Contrasenya (DNI).
+              // Camp de Contrasenya.
               TextFormField(
                 controller: _passwordController,
-                obscureText: true, // Oculta el text de la contrasenya.
+                obscureText: true,
+                // Habilita lletres, números i símbols
+                keyboardType: TextInputType.visiblePassword,
+
                 decoration: const InputDecoration(
-                  labelText: 'Contrasenya (DNI 8 números)',
+                  labelText: 'Contrasenya',
+                  border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.lock_outline),
                 ),
-                keyboardType: TextInputType.number, // Mostra el teclat numèric.
+                validator: (val) =>
+                    val!.isEmpty ? 'Introdueix la contrasenya' : null,
               ),
               const SizedBox(height: 24),
 
@@ -159,20 +174,27 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 24),
 
-              // Text per a contactar amb un admin (abans 'Registrar-se').
-              Row(
+              // Enllaç per activar compte
+              Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('No tens compte?'),
-                  const SizedBox(width: 4),
+                  const Text('És la teua primera vegada?'),
+                  const SizedBox(height: 5),
                   GestureDetector(
-                    // Crida a la funció 'onTap' que hem rebut del [AuthGate].
-                    onTap: widget.onTap,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ActivateAccountPage(),
+                        ),
+                      );
+                    },
                     child: Text(
-                      'Contacta amb un admin',
+                      'Activa el teu compte ací',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: Theme.of(context).colorScheme.secondary,
+                        decoration: TextDecoration.underline,
                       ),
                     ),
                   ),

@@ -1,9 +1,7 @@
 // lib/models/user_model.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Defineix l'estructura de dades per a un usuari/membre.
 class MemberModel {
-  // Propietats existents
   final String id;
   final String nom;
   final String cognoms;
@@ -17,12 +15,11 @@ class MemberModel {
   final bool enExcedencia;
   final bool isAdmin;
 
-  // Propietats opcionals existents
+  // NOU CAMP: Control de configuració inicial
+  final bool isSetupComplete;
+
   final String? fotoUrl;
   final String? descripcio;
-
-  // --- 1. NOU CAMP: Vinculació Familiar ---
-  /// Llista d'IDs dels membres "Niño" vinculats a aquest usuari (si és Senior).
   final List<String> linkedChildrenUids;
 
   MemberModel({
@@ -38,13 +35,12 @@ class MemberModel {
     required this.tipusQuota,
     required this.enExcedencia,
     required this.isAdmin,
+    this.isSetupComplete = false,
     this.fotoUrl,
     this.descripcio,
-    // Inicialitzem la llista buida per defecte al constructor
-    this.linkedChildrenUids = const [],
+    required this.linkedChildrenUids,
   });
 
-  /// Constructor de fàbrica des de Firestore
   factory MemberModel.fromJson(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
 
@@ -61,24 +57,39 @@ class MemberModel {
       tipusQuota: data['tipusQuota'] ?? 'normal',
       enExcedencia: data['enExcedencia'] ?? false,
       isAdmin: data['isAdmin'] ?? false,
+      isSetupComplete: data['isSetupComplete'] ?? false,
       fotoUrl: data['fotoUrl'],
       descripcio: data['descripcio'],
-
-      // Llegim la llista de fills (si existeix) i assegurem el tipus.
       linkedChildrenUids: List<String>.from(data['linkedChildrenUids'] ?? []),
     );
   }
 
-  // --- 2. LÒGICA D'EDAT I ROLS ---
+  Map<String, dynamic> toMap() {
+    return {
+      'nom': nom,
+      'cognoms': cognoms,
+      'mote': mote,
+      'email': email,
+      'dni': dni,
+      'telefon': telefon,
+      'adreca': adreca,
+      'dataNaixement': dataNaixement,
+      'tipusQuota': tipusQuota,
+      'enExcedencia': enExcedencia,
+      'isAdmin': isAdmin,
+      'isSetupComplete': isSetupComplete,
+      'fotoUrl': fotoUrl,
+      'descripcio': descripcio,
+      'linkedChildrenUids': linkedChildrenUids,
+    };
+  }
 
-  /// Calcula l'edat actual basada en la data de naixement.
+  // --- LÒGICA D'EDAT (Getters que faltaven) ---
+
   int get age {
     final DateTime birthDate = dataNaixement.toDate();
     final DateTime today = DateTime.now();
-
     int age = today.year - birthDate.year;
-
-    // Ajustem si encara no ha sigut el seu aniversari enguany
     if (today.month < birthDate.month ||
         (today.month == birthDate.month && today.day < birthDate.day)) {
       age--;
@@ -86,22 +97,12 @@ class MemberModel {
     return age;
   }
 
-  /// És Senior? (Major o igual a 21 anys)
-  /// Té tots els privilegis: votar, anar a actes, gestionar fills.
+  // Senior: Major o igual a 21
   bool get isSenior => age >= 21;
 
-  /// És Jove? (De 16 a 20 anys)
-  /// Pot anar a actes però NO pot votar.
+  // Jove: Entre 16 i 20 (inclosos)
   bool get isYoung => age >= 16 && age < 21;
 
-  /// És Nen? (Menor de 16 anys)
-  /// No té accions pròpies, depèn d'un Senior.
+  // Infantil: Menor de 16 (AQUÍ ESTAVA L'ERROR)
   bool get isChild => age < 16;
-
-  /// Helper per a obtindre el nom del rol en text (per a mostrar al perfil).
-  String get roleName {
-    if (isSenior) return 'Membre Senior';
-    if (isYoung) return 'Membre Jove';
-    return 'Infantil';
-  }
 }

@@ -42,6 +42,79 @@ class FirestoreService {
 
   User? get _currentUser => _auth.currentUser;
 
+  // --- FASE 1: CREACIÓ D'USUARI "PRE-APROVAT" (ADMIN) ---
+  Future<void> createPreApprovedUser({
+    required String email,
+    required String nom,
+    required String cognoms,
+  }) async {
+    await members.add({
+      'email': email.trim().toLowerCase(),
+      'nom': nom,
+      'cognoms': cognoms,
+      'isSetupComplete': false,
+      'createdAt': FieldValue.serverTimestamp(),
+
+      // Campos vacíos iniciales
+      'mote': '',
+      'dni': '',
+      'telefon': '',
+      'adreca': '',
+
+      // --- CAMBIOS SOLICITADOS ---
+      'tipusQuota': 'full', // Por defecto: Cuota completa
+      'enExcedencia': true, // Por defecto: En excedencia
+
+      'isAdmin': false,
+      'linkedChildrenUids': [],
+      'dataNaixement': Timestamp.fromDate(DateTime(2000, 1, 1)),
+    });
+  }
+
+  // --- FASE 2: ACTIVACIÓ (AUTH) ---
+
+  // 1. Busca si existeix un usuari pre-aprovat amb aquest email
+  Future<String?> findPreApprovedUserDocId(String email) async {
+    final query = await members
+        .where('email', isEqualTo: email.trim().toLowerCase())
+        .limit(1)
+        .get();
+
+    if (query.docs.isNotEmpty) {
+      return query.docs.first.id; // Retorna l'ID del document temporal
+    }
+    return null;
+  }
+
+  // 2. Migració: Mou les dades del Doc Temporal al nou UID d'Auth
+  Future<void> migrateToRealUser(String tempDocId, String newAuthUid) async {
+    final tempDocRef = members.doc(tempDocId);
+    final newDocRef = members.doc(newAuthUid);
+
+    // Llegim dades antigues
+    final snapshot = await tempDocRef.get();
+    if (!snapshot.exists) return;
+
+    final data = snapshot.data() as Map<String, dynamic>;
+
+    // Guardem al nou lloc (l'ID del document serà el UID de l'usuari)
+    await newDocRef.set(data);
+
+    // Esborrem el vell per no tindre duplicats
+    await tempDocRef.delete();
+  }
+
+  // --- FASE 3: COMPLETAR PERFIL (SETUP) ---
+  Future<void> completeUserProfile(
+    String uid,
+    Map<String, dynamic> data,
+  ) async {
+    await members.doc(uid).update({
+      ...data, // DNI, Telèfon, etc.
+      'isSetupComplete': true, // MARQUEM COM A COMPLETAT
+    });
+  }
+
   // --- Funcions de Membres (Sense canvis) ---
   Future<MemberModel> getMemberDetails(String uid) async {
     try {

@@ -30,20 +30,26 @@ class _EventsPageState extends State<EventsPage> {
     _loadAdminStatus();
   }
 
+  // Mantenim açò per al botó d'historial (opcional)
   Future<void> _loadAdminStatus() async {
     final User? currentUser = _auth.currentUser;
     if (currentUser == null) return;
     try {
-      final MemberModel member = await _firestoreService.getMemberDetails(
-        currentUser.uid,
-      );
-      if (mounted) {
-        setState(() {
-          _isAdmin = member.isAdmin;
-        });
+      final DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('membres')
+          .doc(currentUser.uid)
+          .get();
+
+      if (userDoc.exists) {
+        final MemberModel member = MemberModel.fromJson(userDoc);
+        if (mounted) {
+          setState(() {
+            _isAdmin = member.isAdmin;
+          });
+        }
       }
     } catch (e) {
-      print('Error al carregar estat d\'admin: $e');
+      print("Error carregant status d'admin: $e");
     }
   }
 
@@ -53,80 +59,74 @@ class _EventsPageState extends State<EventsPage> {
       appBar: AppBar(
         title: const Text('Esdeveniments'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.history),
-            tooltip: 'Esdeveniments Passats',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const PastEventsPage()),
-              );
-            },
-          ),
+          // L'historial el mantenim només per a admins?
+          // Si vols que el veja tothom, lleva el "if (_isAdmin)"
+          if (_isAdmin)
+            IconButton(
+              icon: const Icon(Icons.archive),
+              tooltip: 'Esdeveniments Passats',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const PastEventsPage(),
+                  ),
+                );
+              },
+            ),
         ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: _firestoreService.getEventsStream(),
+      body: StreamBuilder<List<EventModel>>(
+        stream: _firestoreService.getFutureEvents(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
+            return const Center(child: Text('Error carregant esdeveniments'));
           }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
             return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Text(
-                  'No hi ha esdeveniments programats pròximament.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 18, color: Colors.grey),
-                ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.event_busy, size: 60, color: Colors.grey),
+                  SizedBox(height: 10),
+                  Text(
+                    'No hi ha esdeveniments propers',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ],
               ),
             );
           }
 
-          final List<EventModel> events = snapshot.data!.docs
-              .map((doc) => EventModel.fromJson(doc))
-              .toList();
+          final events = snapshot.data!;
 
           return ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
             itemCount: events.length,
             itemBuilder: (context, index) {
               final event = events[index];
               final formattedDate = DateFormat(
-                'd MMMM, yyyy - HH:mm',
+                'dd/MM/yyyy HH:mm',
                 'ca',
               ).format(event.date.toDate());
 
               return Card(
-                margin: const EdgeInsets.symmetric(vertical: 5.0),
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16.0,
-                    vertical: 8.0,
-                  ),
-                  // --- CAMBIO: FOTO O ICONA ---
                   leading: CircleAvatar(
                     backgroundColor: Theme.of(context).colorScheme.primary,
-                    // Si hi ha URL, la posem de fons
                     backgroundImage:
                         (event.imageUrl != null && event.imageUrl!.isNotEmpty)
                         ? NetworkImage(event.imageUrl!)
                         : null,
-                    // Si NO hi ha URL, posem la icona
                     child: (event.imageUrl == null || event.imageUrl!.isEmpty)
                         ? Icon(
                             getIconData(event.iconName, type: 'event'),
                             color: Colors.white,
                           )
-                        : null, // Si hi ha foto, no posem child (perquè es veuria damunt)
+                        : null,
                   ),
                   title: Text(
                     event.title,
@@ -150,20 +150,19 @@ class _EventsPageState extends State<EventsPage> {
         },
       ),
 
-      floatingActionButton: _isAdmin
-          ? FloatingActionButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const CreateEventPage(),
-                    fullscreenDialog: true,
-                  ),
-                );
-              },
-              child: const Icon(Icons.add),
-            )
-          : null,
+      // --- CAMBIO AQUÍ: Botón visible para TODOS ---
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const CreateEventPage(),
+              fullscreenDialog: true,
+            ),
+          );
+        },
+        child: const Icon(Icons.add),
+      ),
     );
   }
 }
