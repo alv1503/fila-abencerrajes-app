@@ -19,7 +19,7 @@ class EventModel {
   final String? iconName;
   final String? imageUrl;
 
-  // --- NOU: Document Adjunt Temporal ---
+  // --- Document Adjunt Temporal ---
   final String? attachedFileUrl;
   final String? attachedFileName;
 
@@ -44,6 +44,7 @@ class EventModel {
     this.attachedFileName,
   });
 
+  // Constructor existent (usat en algunes parts antigues)
   factory EventModel.fromJson(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
 
@@ -68,9 +69,15 @@ class EventModel {
       ),
       iconName: data['iconName'],
       imageUrl: data['imageUrl'],
-      // Mapeig dels nous camps
       attachedFileUrl: data['attachedFileUrl'],
       attachedFileName: data['attachedFileName'],
     );
+  }
+
+  // --- NOU CONSTRUCTOR: fromFirestore ---
+  // Aquest és el que crida el nou codi de FirestoreService.
+  // Simplement reutilitza la lògica de fromJson per a no duplicar codi.
+  factory EventModel.fromFirestore(DocumentSnapshot doc) {
+    return EventModel.fromJson(doc);
   }
 }
