@@ -4,9 +4,9 @@
     <title>Filà Abencerrajes App Updates</title>
 
     <item>
-      <title>Versión 1.0.1</title>
+      <title>Versión 1.0.2</title> 
       <description>Iconos reorganizados y mejoras visuales.</description>
-      <pubDate>Mon, 24 Nov 2025 18:00:00 +0000</pubDate>
+      <pubDate>Mon, 29 Dec 2025 18:00:00 +0000</pubDate> 
       <enclosure url="https://github.com/alv1503/fila-abencerrajes-app/releases/download/v.1.0.2/app-release.apk" sparkle:version="1.0.2+3" sparkle:os="android" />
     </item>
     
