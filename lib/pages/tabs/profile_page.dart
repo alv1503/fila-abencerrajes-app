@@ -8,10 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:abenceapp/pages/forms/edit_profile_page.dart';
 import 'package:abenceapp/pages/admin/admin_panel_page.dart';
-import 'package:abenceapp/pages/forms/feedback_page.dart'; // Import del Feedback
-import 'package:abenceapp/auth/login_page.dart'; // Import del Login
+import 'package:abenceapp/pages/forms/feedback_page.dart';
+import 'package:abenceapp/auth/login_page.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-/// La pestanya de Perfil de l'usuari actual (loguejat).
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -20,38 +20,50 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  // Serveis necessaris
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
-
-  // Obtenim l'ID de l'usuari actual directament d'Auth.
   final String _currentUserId = FirebaseAuth.instance.currentUser!.uid;
+  bool _needsRefresh = false;
 
-  // Variable d'estat per a actualitzar la imatge de perfil a l'instant
-  String? _newProfileImageUrl;
-
-  /// Obre el selector d'imatges i puja la imatge
-  Future<void> _pickAndUploadImage() async {
+  Future<void> _openDownloadPage() async {
+    final Uri url = Uri.parse(
+      'https://github.com/alv1503/fila-abencerrajes-app/releases',
+    );
     try {
-      final String? imageUrl = await _firestoreService.uploadProfileImage();
-
-      if (imageUrl != null) {
-        setState(() {
-          _newProfileImageUrl = imageUrl;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Imatge de perfil actualitzada!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+        throw Exception('No es pot obrir $url');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error en pujar la imatge: $e'),
-          backgroundColor: Colors.red,
-        ),
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
+  }
+
+  Future<void> _refreshData() async {
+    setState(() => _needsRefresh = !_needsRefresh);
+    await Future.delayed(const Duration(milliseconds: 500));
+  }
+
+  void _navigateToEdit(MemberModel member) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EditProfilePage(currentMember: member),
+      ),
+    );
+    _refreshData();
+  }
+
+  Future<void> _logout() async {
+    await _authService.signOut();
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+        (route) => false,
       );
     }
   }
@@ -59,294 +71,201 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // SafeArea evita que el contingut es solape amb la barra d'estat
-      body: SafeArea(
+      appBar: AppBar(
+        title: const Text('El meu Perfil'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.feedback_outlined),
+            tooltip: 'Enviar suggeriment',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const FeedbackPage()),
+              );
+            },
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _refreshData,
         child: StreamBuilder<DocumentSnapshot>(
           stream: _firestoreService.members.doc(_currentUserId).snapshots(),
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
+            if (snapshot.connectionState == ConnectionState.waiting)
               return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
+            if (snapshot.hasError)
               return Center(child: Text('Error: ${snapshot.error}'));
-            }
-            if (!snapshot.hasData || !snapshot.data!.exists) {
-              return const Center(
-                child: Text('No s\'han trobat les dades del perfil.'),
-              );
-            }
+            if (!snapshot.hasData || !snapshot.data!.exists)
+              return const Center(child: Text('Usuari no trobat.'));
 
-            final MemberModel member = MemberModel.fromJson(snapshot.data!);
-            final String? currentPhotoUrl =
-                _newProfileImageUrl ?? member.fotoUrl;
+            MemberModel member = MemberModel.fromJson(snapshot.data!);
 
             return SingleChildScrollView(
               padding: const EdgeInsets.all(16.0),
+              physics: const AlwaysScrollableScrollPhysics(),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _buildHeader(context, member),
+                  const SizedBox(height: 24),
+
+                  _buildInfoCard(
+                    context,
+                    title: 'Informació Personal',
+                    children: [
+                      _ProfileInfoTile(
+                        icon: Icons.cake,
+                        title: 'Data de Naixement',
+                        subtitle: member.dataNaixement != null
+                            ? DateFormat(
+                                'dd/MM/yyyy',
+                              ).format(member.dataNaixement!.toDate())
+                            : 'No especificada',
+                      ),
+                      const Divider(),
+                      _ProfileInfoTile(
+                        icon: Icons.location_on,
+                        title: 'Adreça',
+                        subtitle: member.adreca.isNotEmpty
+                            ? member.adreca
+                            : 'No especificada',
+                      ),
+                      const Divider(),
+                      _ProfileInfoTile(
+                        icon: Icons.info_outline,
+                        title: 'Descripció',
+                        subtitle: member.descripcio?.isNotEmpty == true
+                            ? member.descripcio!
+                            : 'Sense descripció',
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 20),
 
-                  // --- AVATAR ---
-                  Center(
-                    child: GestureDetector(
-                      onTap: _pickAndUploadImage,
-                      child: Stack(
-                        children: [
-                          CircleAvatar(
-                            radius: 60,
-                            backgroundColor: Theme.of(
-                              context,
-                            ).colorScheme.primary,
-                            backgroundImage:
-                                currentPhotoUrl != null &&
-                                    currentPhotoUrl.isNotEmpty
-                                ? NetworkImage(currentPhotoUrl)
-                                : null,
-                            child:
-                                (currentPhotoUrl == null ||
-                                    currentPhotoUrl.isEmpty)
-                                ? Text(
-                                    member.mote.isNotEmpty
-                                        ? member.mote[0].toUpperCase()
-                                        : '?',
-                                    style: const TextStyle(
-                                      fontSize: 60,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : null,
-                          ),
-                          Positioned(
-                            bottom: 0,
-                            right: 0,
-                            child: CircleAvatar(
-                              backgroundColor: Theme.of(
-                                context,
-                              ).colorScheme.secondary,
-                              radius: 20,
-                              child: const Icon(
-                                Icons.camera_alt,
-                                color: Colors.black,
-                              ),
-                            ),
-                          ),
-                        ],
+                  _buildInfoCard(
+                    context,
+                    title: 'Dades de Contacte',
+                    children: [
+                      _ProfileInfoTile(
+                        icon: Icons.email,
+                        title: 'Email',
+                        subtitle: member.email,
                       ),
-                    ),
+                      const Divider(),
+                      _ProfileInfoTile(
+                        icon: Icons.phone,
+                        title: 'Telèfon',
+                        subtitle: member.telefon.isNotEmpty
+                            ? member.telefon
+                            : 'No especificat',
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
 
-                  // --- Noms i Mote ---
-                  Center(
-                    child: Text(
-                      member.mote,
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  Center(
-                    child: Text(
-                      '${member.nom} ${member.cognoms}',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.grey[600],
+                  _buildInfoCard(
+                    context,
+                    title: 'Informació Festera',
+                    children: [
+                      _ProfileInfoTile(
+                        icon: Icons.badge,
+                        title: 'DNI',
+                        subtitle: member.dni.isNotEmpty
+                            ? member.dni
+                            : 'No registrat',
                       ),
-                    ),
+                      const Divider(),
+                      _ProfileInfoTile(
+                        icon: Icons.monetization_on,
+                        title: 'Quota',
+                        subtitle: member.tipusQuota.toUpperCase(),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 20),
 
-                  // --- Botó d'Editar Perfil ---
-                  TextButton.icon(
-                    icon: Icon(
-                      Icons.edit,
-                      size: 16,
-                      color: Theme.of(context).colorScheme.secondary,
-                    ),
-                    label: Text(
-                      'Editar Perfil',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.secondary,
+                  // --- AQUÍ ESTÁ EL BOTÓN DE ACTUALIZAR ---
+                  _buildInfoCard(
+                    context,
+                    title: 'Aplicació',
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          Icons.system_update,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        title: const Text('Buscar Actualitzacions'),
+                        subtitle: const Text('Obrir pàgina de descàrregues'),
+                        trailing: const Icon(
+                          Icons.open_in_new,
+                          size: 18,
+                          color: Colors.grey,
+                        ),
+                        onTap: _openDownloadPage,
                       ),
-                    ),
-                    onPressed: () {
-                      Navigator.push(
+                      const Divider(),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          Icons.info_outline,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        title: const Text('Versió Instal·lada'),
+                        subtitle: const Text('1.0.2'),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 32),
+                  if (member.isAdmin) ...[
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.admin_panel_settings),
+                      label: const Text('Panell d\'Administrador'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black87,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 50),
+                      ),
+                      onPressed: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) =>
-                              EditProfilePage(currentMember: member),
+                          builder: (context) => const AdminPanelPage(),
                         ),
-                      );
-                    },
-                  ),
-                  const Divider(height: 30),
-
-                  // --- BOTÓ: PANELL D'ADMINISTRACIÓ ---
-                  if (member.isAdmin)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0, bottom: 20.0),
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.admin_panel_settings),
-                        label: const Text('Panell d\'Administració'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red[900],
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(double.infinity, 48),
-                        ),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const AdminPanelPage(),
-                            ),
-                          );
-                        },
                       ),
                     ),
-
-                  // --- Targeta "Sobre mi" ---
-                  if (member.descripcio != null &&
-                      member.descripcio!.isNotEmpty) ...[
-                    _buildInfoCard(
-                      context,
-                      title: "Sobre mi",
-                      children: [
-                        Text(
-                          member.descripcio!,
-                          style: Theme.of(context).textTheme.bodyLarge
-                              ?.copyWith(fontStyle: FontStyle.italic),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
                   ],
 
-                  // --- Targeta "Dades de Contacte" ---
-                  _buildInfoCard(
-                    context,
-                    title: "Dades de Contacte",
-                    children: [
-                      _ProfileInfoTile(
-                        icon: Icons.email_outlined,
-                        title: member.email,
-                        subtitle: "Correu Electrònic",
-                      ),
-                      _ProfileInfoTile(
-                        icon: Icons.phone_outlined,
-                        title: member.telefon,
-                        subtitle: "Telèfon",
-                      ),
-                      _ProfileInfoTile(
-                        icon: Icons.home_outlined,
-                        title: member.adreca,
-                        subtitle: "Adreça",
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // --- Targeta "Dades Personals" ---
-                  _buildInfoCard(
-                    context,
-                    title: "Dades Personals",
-                    children: [
-                      _ProfileInfoTile(
-                        icon: Icons.badge_outlined,
-                        title: member.dni,
-                        subtitle: "DNI",
-                      ),
-                      _ProfileInfoTile(
-                        icon: Icons.cake_outlined,
-                        title: DateFormat(
-                          'd MMMM, yyyy',
-                          'ca',
-                        ).format(member.dataNaixement.toDate()),
-                        subtitle: "Data de Naixement",
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // --- Targeta "Dades de la Filà" ---
-                  _buildInfoCard(
-                    context,
-                    title: "Dades de la Filà",
-                    children: [
-                      _ProfileInfoTile(
-                        icon: Icons.shield_outlined,
-                        title: member.tipusQuota.isNotEmpty
-                            ? member.tipusQuota[0].toUpperCase() +
-                                  member.tipusQuota.substring(1)
-                            : 'No definida',
-                        subtitle: "Tipus de Quota",
-                      ),
-                      _ProfileInfoTile(
-                        icon: Icons.work_off_outlined,
-                        title: member.enExcedencia ? 'Sí' : 'No',
-                        subtitle: "Excedència disponible",
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 40),
-
-                  // --- ZONA D'ACCIONS DE SISTEMA ---
-
-                  // 1. BOTÓ FEEDBACK / ERROR
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      icon: const Icon(Icons.bug_report),
-                      label: const Text("Informar d'un error / Suggeriment"),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.grey[700],
-                        side: BorderSide(color: Colors.grey[400]!),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const FeedbackPage(),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // 2. BOTÓ TANCAR SESSIÓ
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.logout),
-                      label: const Text('Tancar Sessió'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.grey[800],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      icon: const Icon(Icons.logout, color: Colors.red),
+                      label: const Text(
+                        'Tancar Sessió',
+                        style: TextStyle(color: Colors.red),
                       ),
                       onPressed: () async {
-                        try {
-                          await _authService.signOut();
-                          if (mounted) {
-                            // Fix del problema del onTap: passem una funció buida
-                            Navigator.of(context).pushReplacement(
-                              MaterialPageRoute(
-                                builder: (context) => LoginPage(onTap: () {}),
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Tancar Sessió'),
+                            content: const Text('Estàs segur?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                child: const Text('Cancel·lar'),
                               ),
-                            );
-                          }
-                        } catch (e) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error: $e')),
-                            );
-                          }
-                        }
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                child: const Text('Sortir'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirm == true) _logout();
                       },
                     ),
                   ),
-
                   const SizedBox(height: 20),
                 ],
               ),
@@ -357,7 +276,57 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // --- WIDGETS D'AJUDA (Helpers) ---
+  Widget _buildHeader(BuildContext context, MemberModel member) {
+    return Column(
+      children: [
+        Stack(
+          children: [
+            CircleAvatar(
+              radius: 60,
+              backgroundColor: Colors.grey.shade300,
+              backgroundImage:
+                  (member.fotoUrl != null && member.fotoUrl!.isNotEmpty)
+                  ? NetworkImage(member.fotoUrl!)
+                  : null,
+              child: (member.fotoUrl == null || member.fotoUrl!.isEmpty)
+                  ? Text(
+                      member.nom.isNotEmpty ? member.nom[0].toUpperCase() : '?',
+                      style: const TextStyle(fontSize: 40),
+                    )
+                  : null,
+            ),
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: CircleAvatar(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                radius: 18,
+                child: IconButton(
+                  icon: const Icon(Icons.edit, size: 18, color: Colors.white),
+                  onPressed: () => _navigateToEdit(member),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(
+          '${member.nom} ${member.cognoms}',
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        if (member.mote.isNotEmpty)
+          Text(
+            '"${member.mote}"',
+            style: const TextStyle(
+              fontStyle: FontStyle.italic,
+              color: Colors.grey,
+            ),
+          ),
+      ],
+    );
+  }
 
   Widget _buildInfoCard(
     BuildContext context, {
@@ -374,9 +343,10 @@ class _ProfilePageState extends State<ProfilePage> {
           children: [
             Text(
               title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              style: TextStyle(
                 color: Theme.of(context).colorScheme.primary,
                 fontWeight: FontWeight.bold,
+                fontSize: 18,
               ),
             ),
             const Divider(),
@@ -387,16 +357,22 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  // --- CORRECCIÓN FINAL: onTap AHORA ES OPCIONAL (nullable) ---
   Widget _ProfileInfoTile({
     required IconData icon,
     required String title,
     required String subtitle,
+    VoidCallback? onTap, // <--- El "?" es la clave para que no sea required
   }) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(icon, color: Theme.of(context).colorScheme.secondary),
-      title: Text(title),
-      subtitle: Text(subtitle),
+      title: Text(
+        title,
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+      ),
+      subtitle: Text(subtitle, style: const TextStyle(fontSize: 16)),
+      onTap: onTap,
     );
   }
 }
