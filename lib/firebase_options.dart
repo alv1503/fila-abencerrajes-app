@@ -17,29 +17,17 @@ import 'package:flutter/foundation.dart'
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
-      throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web - '
-        'you can reconfigure this by running the FlutterFire CLI again.',
-      );
+      return web;
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
@@ -59,4 +47,41 @@ class DefaultFirebaseOptions {
     projectId: 'abencerrajes-app',
     storageBucket: 'abencerrajes-app.firebasestorage.app',
   );
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyDnGUOhZadOCNYEOEK7SWcJR17GPdTtxDo',
+    appId: '1:23111155461:web:c042f7c2ef98132b6a416c',
+    messagingSenderId: '23111155461',
+    projectId: 'abencerrajes-app',
+    authDomain: 'abencerrajes-app.firebaseapp.com',
+    storageBucket: 'abencerrajes-app.firebasestorage.app',
+  );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyDjwiMbVdhv1-GRFbP_WSBBt-XjG8ank8g',
+    appId: '1:23111155461:ios:17f650630b3ff2aa6a416c',
+    messagingSenderId: '23111155461',
+    projectId: 'abencerrajes-app',
+    storageBucket: 'abencerrajes-app.firebasestorage.app',
+    iosBundleId: 'com.example.abenceapp',
+  );
+
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyDjwiMbVdhv1-GRFbP_WSBBt-XjG8ank8g',
+    appId: '1:23111155461:ios:17f650630b3ff2aa6a416c',
+    messagingSenderId: '23111155461',
+    projectId: 'abencerrajes-app',
+    storageBucket: 'abencerrajes-app.firebasestorage.app',
+    iosBundleId: 'com.example.abenceapp',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyDnGUOhZadOCNYEOEK7SWcJR17GPdTtxDo',
+    appId: '1:23111155461:web:599648d8ceff334f6a416c',
+    messagingSenderId: '23111155461',
+    projectId: 'abencerrajes-app',
+    authDomain: 'abencerrajes-app.firebaseapp.com',
+    storageBucket: 'abencerrajes-app.firebasestorage.app',
+  );
+
 }

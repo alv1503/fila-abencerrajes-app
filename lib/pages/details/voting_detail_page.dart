@@ -1,4 +1,3 @@
-// lib/pages/details/voting_detail_page.dart
 import 'package:abenceapp/models/user_model.dart';
 import 'package:abenceapp/models/voting_model.dart';
 import 'package:abenceapp/services/firestore_service.dart';
@@ -7,7 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:abenceapp/utils/icon_helper.dart';
-// --- IMPORT NECESSARI ---
+// Assegura't que tens aquest import o comenta'l si no uses PDF encara
 import 'package:abenceapp/pages/details/pdf_viewer_page.dart';
 
 class VotingDetailPage extends StatefulWidget {
@@ -26,6 +25,7 @@ class _VotingDetailPageState extends State<VotingDetailPage> {
   List<String> _selectedOptions = [];
   bool _isChangingVote = false;
   bool _isAdmin = false;
+  bool _isLoading = false;
 
   @override
   void initState() {
@@ -40,424 +40,404 @@ class _VotingDetailPageState extends State<VotingDetailPage> {
       );
       if (mounted) setState(() => _isAdmin = member.isAdmin);
     } catch (e) {
-      /*...*/
+      debugPrint('Error admin: $e');
     }
   }
 
-  Future<void> _deleteVoting() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Esborrar Votació'),
-        content: const Text('Estàs segur?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel·lar'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Esborrar'),
-          ),
-        ],
-      ),
-    );
-    if (confirm == true) {
-      try {
-        await _firestoreService.deleteVoting(widget.votingId);
-        if (mounted) Navigator.pop(context);
-      } catch (e) {
-        /*...*/
-      }
+  // --- ENVIAR VOT ---
+  Future<void> _submitVote(VotingModel voting) async {
+    // Validacions
+    if (voting.allowMultipleChoices) {
+      if (_selectedOptions.isEmpty) return;
+    } else {
+      if (_selectedOption == null) return;
     }
-  }
 
-  Future<void> _castVote(VotingModel voting, bool hasVoted) async {
-    if (voting.endDate.toDate().isBefore(DateTime.now())) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Votació tancada.'),
-          backgroundColor: Colors.red,
-        ),
+    setState(() => _isLoading = true);
+
+    try {
+      dynamic voteData = voting.allowMultipleChoices
+          ? _selectedOptions
+          : _selectedOption;
+
+      // CRIDA A LA FUNCIÓ NOVA QUE HAS AFEGIT AL SERVICE
+      await _firestoreService.submitVote(
+        widget.votingId,
+        _currentUserId,
+        voteData,
       );
-      return;
-    }
-    bool isValid = voting.allowMultipleChoices
-        ? _selectedOptions.isNotEmpty
-        : _selectedOption != null;
-    if (!isValid) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Selecciona almenys una opció.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-    dynamic voteData = voting.allowMultipleChoices
-        ? _selectedOptions
-        : _selectedOption;
-    String displayVote = voting.allowMultipleChoices
-        ? _selectedOptions.join(", ")
-        : _selectedOption!;
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(hasVoted ? 'Canviar Vot' : 'Confirmar Vot'),
-        content: Text('Vols votar per: "$displayVote"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel·lar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(hasVoted ? 'Canviar' : 'Votar'),
-          ),
-        ],
-      ),
-    );
-    if (confirm == true && mounted) {
-      try {
-        await _firestoreService.castVote(widget.votingId, voteData);
+
+      if (mounted) {
+        setState(() => _isChangingVote = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Vot registrat!'),
+            content: Text('Vot registrat correctament!'),
             backgroundColor: Colors.green,
           ),
         );
-        if (hasVoted) setState(() => _isChangingVote = false);
-      } catch (e) {
+      }
+    } catch (e) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Error.'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error al votar: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Map<String, double> _calculateResults(VotingModel voting) {
-    final Map<String, int> voteCounts = {};
-    int totalVotes = voting.results.length;
-    if (totalVotes == 0) {
-      return {for (var option in voting.options) option: 0.0};
+  // --- ESBORRAR VOT ---
+  Future<void> _removeVote() async {
+    setState(() => _isLoading = true);
+    try {
+      await _firestoreService.removeVote(widget.votingId, _currentUserId);
+      if (mounted) {
+        setState(() {
+          _selectedOption = null;
+          _selectedOptions = [];
+          _isChangingVote = true;
+        });
+      }
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  // --- CÀLCUL DE RESULTATS ---
+  Map<String, double> _calculatePercentages(VotingModel voting) {
+    Map<String, double> percentages = {};
     for (var option in voting.options) {
-      voteCounts[option] = 0;
+      percentages[option] = 0.0;
     }
-    for (var voteData in voting.results.values) {
-      if (voteData is List) {
-        for (var option in voteData) {
-          if (voteCounts.containsKey(option)) {
-            voteCounts[option] = voteCounts[option]! + 1;
+
+    int totalVotesCount = 0;
+    voting.results.forEach((userId, voteContent) {
+      if (voteContent is String) {
+        if (percentages.containsKey(voteContent)) {
+          percentages[voteContent] = percentages[voteContent]! + 1;
+          totalVotesCount++;
+        }
+      } else if (voteContent is List) {
+        for (var option in voteContent) {
+          if (percentages.containsKey(option)) {
+            percentages[option] = percentages[option]! + 1;
+            totalVotesCount++;
           }
         }
-      } else {
-        if (voteCounts.containsKey(voteData)) {
-          voteCounts[voteData] = voteCounts[voteData]! + 1;
-        }
       }
+    });
+
+    if (totalVotesCount > 0) {
+      percentages.forEach((key, value) {
+        percentages[key] = (value / totalVotesCount) * 100;
+      });
     }
-    final Map<String, double> results = {};
-    for (var entry in voteCounts.entries) {
-      results[entry.key] = (entry.value / totalVotes) * 100;
-    }
-    return results;
+    return percentages;
+  }
+
+  void _toggleOption(String option, bool isMultiple) {
+    setState(() {
+      if (isMultiple) {
+        if (_selectedOptions.contains(option)) {
+          _selectedOptions.remove(option);
+        } else {
+          _selectedOptions.add(option);
+        }
+      } else {
+        _selectedOption = option;
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: _firestoreService.getVotingDocumentStream(widget.votingId),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData || !snapshot.data!.exists) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final VotingModel voting = VotingModel.fromJson(snapshot.data!);
-          final dynamic userVoteData = voting.results[_currentUserId];
-          final bool hasVoted = userVoteData != null;
-          final bool isExpired = voting.endDate.toDate().isBefore(
-            DateTime.now(),
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _firestoreService.votings.doc(widget.votingId).snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData)
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
           );
 
-          if (hasVoted && _isChangingVote) {
-            if (voting.allowMultipleChoices) {
-              if (_selectedOptions.isEmpty && userVoteData is List) {
-                _selectedOptions = List<String>.from(userVoteData);
-              }
-            } else {
-              if (_selectedOption == null && userVoteData is String) {
-                _selectedOption = userVoteData;
-              }
-            }
-          }
+        // Si el document no existeix (esborrat)
+        if (!snapshot.data!.exists)
+          return const Scaffold(
+            body: Center(child: Text('Votació no trobada')),
+          );
 
-          return CustomScrollView(
-            slivers: [
-              SliverAppBar(
-                expandedHeight: 200.0,
-                pinned: true,
-                flexibleSpace: FlexibleSpaceBar(
-                  title: Text(
-                    voting.title,
-                    style: const TextStyle(
-                      shadows: [Shadow(color: Colors.black, blurRadius: 4)],
-                    ),
-                  ),
-                  background:
-                      voting.imageUrl != null && voting.imageUrl!.isNotEmpty
-                      ? Image.network(voting.imageUrl!, fit: BoxFit.cover)
-                      : Container(
-                          color: Theme.of(context).colorScheme.primary,
-                          child: Icon(
-                            getIconData(voting.iconName, type: 'voting'),
-                            size: 100,
-                            color: Colors.black38,
+        final voting = VotingModel.fromJson(snapshot.data!);
+        final bool isExpired = voting.endDate.toDate().isBefore(DateTime.now());
+        final bool hasVoted = voting.results.containsKey(_currentUserId);
+
+        // Recuperar el meu vot per pintar-lo
+        dynamic myVote = voting.results[_currentUserId];
+        bool userVotedThis(String option) {
+          if (!hasVoted) return false;
+          if (myVote is String) return myVote == option;
+          if (myVote is List) return myVote.contains(option);
+          return false;
+        }
+
+        final percentages = _calculatePercentages(voting);
+        final bool showResults = (hasVoted && !_isChangingVote) || isExpired;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Votació'),
+            actions: [
+              if (_isAdmin)
+                IconButton(
+                  icon: const Icon(Icons.delete),
+                  onPressed: () async {
+                    final confirm = await showDialog(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text("Esborrar votació?"),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text("No"),
                           ),
-                        ),
-                ),
-                actions: [
-                  if (_isAdmin)
-                    IconButton(
-                      icon: const Icon(
-                        Icons.delete_outline,
-                        color: Colors.redAccent,
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text("Si"),
+                          ),
+                        ],
                       ),
-                      onPressed: _deleteVoting,
+                    );
+                    if (confirm == true) {
+                      await _firestoreService.votings
+                          .doc(widget.votingId)
+                          .delete();
+                      if (mounted) Navigator.pop(context);
+                    }
+                  },
+                ),
+            ],
+          ),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      getIconData(voting.iconName, type: 'voting'),
+                      size: 40,
+                      color: Theme.of(context).primaryColor,
                     ),
-                ],
-              ),
-              SliverList(
-                delegate: SliverChildListDelegate([
-                  Padding(
-                    padding: const EdgeInsets.all(20.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          'Tanca: ${DateFormat('dd MMM HH:mm').format(voting.endDate.toDate())}',
-                          style: TextStyle(color: Colors.grey[400]),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          voting.description,
-                          style: Theme.of(
-                            context,
-                          ).textTheme.bodyLarge?.copyWith(fontSize: 16),
-                        ),
-
-                        // --- BOTÓ VEURE ADJUNT ---
-                        if (voting.attachedFileUrl != null &&
-                            voting.attachedFileUrl!.isNotEmpty)
-                          Container(
-                            margin: const EdgeInsets.only(top: 20, bottom: 10),
-                            child: ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => PdfViewerPage(
-                                      pdfUrl: voting.attachedFileUrl!,
-                                      title:
-                                          voting.attachedFileName ??
-                                          'Document Adjunt',
-                                    ),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.description),
-                              label: Text(
-                                "Veure Document: ${voting.attachedFileName ?? 'PDF'}",
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blueGrey[800],
-                                foregroundColor: Colors.white,
-                                minimumSize: const Size(double.infinity, 48),
-                              ),
-                            ),
-                          ),
-
-                        const Divider(height: 40),
-
-                        if (isExpired) ...[
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            'Resultats Finals',
-                            style: Theme.of(context).textTheme.titleLarge,
+                            voting.title,
+                            style: Theme.of(context).textTheme.headlineSmall,
                           ),
-                          const SizedBox(height: 20),
-                          ..._calculateResults(voting).entries.map(
-                            (e) =>
-                                _buildResultBar(context, e.key, e.value, false),
+                          Text(
+                            'Tanca: ${DateFormat('dd/MM/yyyy HH:mm').format(voting.endDate.toDate())}',
+                            style: TextStyle(
+                              color: isExpired ? Colors.red : Colors.grey,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(voting.description),
 
-                        if (!isExpired) ...[
-                          if (!hasVoted || _isChangingVote) ...[
-                            Text(
-                              voting.allowMultipleChoices
-                                  ? 'Selecciona opcions (Múltiple):'
-                                  : 'Selecciona una opció:',
-                              style: Theme.of(context).textTheme.titleLarge,
+                // PDF Adjunt
+                if (voting.attachedFileUrl != null &&
+                    voting.attachedFileUrl!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16.0),
+                    child: Card(
+                      color: Colors.red.shade50,
+                      child: ListTile(
+                        leading: const Icon(
+                          Icons.picture_as_pdf,
+                          color: Colors.red,
+                        ),
+                        title: Text(
+                          voting.attachedFileName ?? 'Document Adjunt',
+                        ),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PdfViewerPage(
+                              pdfUrl: voting.attachedFileUrl!,
+                              title: voting.title,
                             ),
-                            const SizedBox(height: 16),
-                            ...voting.options.map((option) {
-                              return Card(
-                                child: voting.allowMultipleChoices
-                                    ? CheckboxListTile(
-                                        title: Text(
-                                          option,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        value: _selectedOptions.contains(
-                                          option,
-                                        ),
-                                        onChanged: (val) => setState(() {
-                                          if (val == true) {
-                                            _selectedOptions.add(option);
-                                          } else {
-                                            _selectedOptions.remove(option);
-                                          }
-                                        }),
-                                      )
-                                    : RadioListTile<String>(
-                                        title: Text(
-                                          option,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        value: option,
-                                        groupValue: _selectedOption,
-                                        onChanged: (val) => setState(
-                                          () => _selectedOption = val,
-                                        ),
-                                      ),
-                              );
-                            }),
-                            const SizedBox(height: 24),
-                            ElevatedButton(
-                              onPressed: () => _castVote(voting, hasVoted),
-                              style: ElevatedButton.styleFrom(
-                                minimumSize: const Size(double.infinity, 52),
-                              ),
-                              child: Text(
-                                _isChangingVote
-                                    ? 'Confirmar Canvi'
-                                    : 'Emetre Vot',
-                                style: const TextStyle(fontSize: 18),
-                              ),
-                            ),
-                            if (_isChangingVote)
-                              TextButton(
-                                onPressed: () => setState(() {
-                                  _isChangingVote = false;
-                                  _selectedOption = null;
-                                  _selectedOptions = [];
-                                }),
-                                child: const Text('Cancel·lar canvi'),
-                              ),
-                          ],
-
-                          if (hasVoted && !_isChangingVote) ...[
-                            Text(
-                              'Resultats Actuals',
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                            const SizedBox(height: 20),
-                            ..._calculateResults(voting).entries.map((e) {
-                              bool isUserVote = (userVoteData is List)
-                                  ? userVoteData.contains(e.key)
-                                  : userVoteData == e.key;
-                              return _buildResultBar(
-                                context,
-                                e.key,
-                                e.value,
-                                isUserVote,
-                              );
-                            }),
-                            const SizedBox(height: 20),
-                            Text(
-                              'Has votat: ${userVoteData is List ? userVoteData.join(", ") : userVoteData}',
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.secondary,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            ElevatedButton(
-                              onPressed: () =>
-                                  setState(() => _isChangingVote = true),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.grey[700],
-                                foregroundColor: Colors.white,
-                              ),
-                              child: const Text('Canviar Vot'),
-                            ),
-                          ],
-                        ],
-                      ],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ]),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
+                const Divider(height: 32),
 
-  Widget _buildResultBar(
-    BuildContext context,
-    String option,
-    double percentage,
-    bool isUserVote,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                option,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: isUserVote ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-              Text(
-                '${percentage.toStringAsFixed(1)}%',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: isUserVote
-                      ? Theme.of(context).colorScheme.secondary
-                      : null,
-                  fontWeight: isUserVote ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-            ],
+                // ZONA DE RESULTATS O VOTAR
+                if (showResults) ...[
+                  Text(
+                    'Resultats (${voting.results.length} vots)',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ...voting.options.map((option) {
+                    final percent = percentages[option] ?? 0.0;
+                    final isMyVote = userVotedThis(option);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              option,
+                              style: TextStyle(
+                                fontWeight: isMyVote
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: isMyVote ? Colors.green : Colors.black,
+                              ),
+                            ),
+                            Text('${percent.toStringAsFixed(1)}%'),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        LinearProgressIndicator(
+                          value: percent / 100,
+                          minHeight: 10,
+                          borderRadius: BorderRadius.circular(5),
+                          color: isMyVote
+                              ? Colors.green
+                              : Theme.of(context).primaryColor,
+                          backgroundColor: Colors.grey[200],
+                        ),
+                        if (isMyVote)
+                          const Text(
+                            "(El teu vot)",
+                            style: TextStyle(fontSize: 10, color: Colors.green),
+                          ),
+                        const SizedBox(height: 16),
+                      ],
+                    );
+                  }),
+                  if (!isExpired && hasVoted)
+                    Center(
+                      child: TextButton.icon(
+                        onPressed: _removeVote,
+                        icon: const Icon(Icons.edit),
+                        label: const Text("Canviar el meu vot"),
+                      ),
+                    ),
+                ] else ...[
+                  if (isExpired)
+                    const Center(
+                      child: Text(
+                        "Finalitzada",
+                        style: TextStyle(color: Colors.red, fontSize: 18),
+                      ),
+                    )
+                  else ...[
+                    Text(
+                      voting.allowMultipleChoices
+                          ? 'Tria (Múltiple)'
+                          : 'Tria una opció',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    ...voting.options.map((option) {
+                      final isSelected = voting.allowMultipleChoices
+                          ? _selectedOptions.contains(option)
+                          : _selectedOption == option;
+                      return Card(
+                        elevation: 0,
+                        color: isSelected
+                            ? Theme.of(context).primaryColor.withOpacity(0.1)
+                            : Colors.white,
+                        shape: RoundedRectangleBorder(
+                          side: BorderSide(
+                            color: isSelected
+                                ? Theme.of(context).primaryColor
+                                : Colors.grey.shade300,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: InkWell(
+                          onTap: () => _toggleOption(
+                            option,
+                            voting.allowMultipleChoices,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isSelected
+                                      ? (voting.allowMultipleChoices
+                                            ? Icons.check_box
+                                            : Icons.radio_button_checked)
+                                      : (voting.allowMultipleChoices
+                                            ? Icons.check_box_outline_blank
+                                            : Icons.radio_button_off),
+                                  color: isSelected
+                                      ? Theme.of(context).primaryColor
+                                      : Colors.grey,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    option,
+                                    style: const TextStyle(fontSize: 16),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 20),
+                    if (_isLoading)
+                      const Center(child: CircularProgressIndicator())
+                    else
+                      ElevatedButton(
+                        onPressed: () => _submitVote(voting),
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 50),
+                          backgroundColor: Theme.of(context).primaryColor,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('ENVIAR VOT'),
+                      ),
+                  ],
+                ],
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(
-            value: percentage / 100,
-            minHeight: 12,
-            borderRadius: BorderRadius.circular(6),
-            color: isUserVote
-                ? Theme.of(context).colorScheme.secondary
-                : Theme.of(context).colorScheme.primary,
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

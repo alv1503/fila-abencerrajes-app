@@ -13,15 +13,11 @@ import 'package:intl/intl.dart';
 import 'package:abenceapp/utils/icon_helper.dart';
 import 'package:abenceapp/pages/docs/documents_page.dart';
 import 'package:abenceapp/pages/extras/music_library_page.dart';
-import 'package:abenceapp/pages/extras/order_sheets_page.dart';
 import 'package:abenceapp/pages/extras/tickets_page.dart';
+import 'package:abenceapp/pages/extras/order_sheets_page.dart'; // <--- ESTE ES EL IMPORTANTE
 
 // --- IMPORTS DE ACTUALIZACIONES ---
 import 'package:upgrader/upgrader.dart';
-import 'package:package_info_plus/package_info_plus.dart';
-// Si tens problemes amb Version, assegura't que tens el paquet 'version' instal·lat
-// i descomenta la línia de sota. Si no, usa el package_info_plus o Strings.
-import 'package:version/version.dart';
 
 class HomeFeedPage extends StatefulWidget {
   const HomeFeedPage({super.key});
@@ -32,368 +28,478 @@ class HomeFeedPage extends StatefulWidget {
 
 class _HomeFeedPageState extends State<HomeFeedPage> {
   final FirestoreService _firestoreService = FirestoreService();
-  final String _currentUserId = FirebaseAuth.instance.currentUser!.uid;
-
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   bool _isAdmin = false;
-  List<String> _birthdaysToday = [];
+  String _userName = '';
 
   @override
   void initState() {
     super.initState();
-    _checkAdminAndBirthdays();
+    _loadUserData();
   }
 
-  Future<void> _checkAdminAndBirthdays() async {
-    try {
-      final userDoc = await _firestoreService.getMemberDetails(_currentUserId);
-      if (mounted) setState(() => _isAdmin = userDoc.isAdmin);
-    } catch (e) {
-      /*...*/
+  Future<void> _loadUserData() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      try {
+        final member = await _firestoreService.getMemberDetails(user.uid);
+        if (mounted) {
+          setState(() {
+            _isAdmin = member.isAdmin;
+            _userName = member.mote.isNotEmpty ? member.mote : member.nom;
+          });
+        }
+      } catch (e) {
+        debugPrint('Error carregant usuari: $e');
+      }
     }
-
-    final bdays = await _firestoreService.getBirthdaysToday();
-    if (mounted) setState(() => _birthdaysToday = bdays);
-  }
-
-  Future<void> _deleteAnnouncement(String id) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Esborrar Avís"),
-        content: const Text("Segur?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text("No"),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("Sí"),
-          ),
-        ],
-      ),
-    );
-    if (confirm == true) await _firestoreService.deleteAnnouncement(id);
   }
 
   @override
   Widget build(BuildContext context) {
-    final appcastURL =
-        'https://raw.githubusercontent.com/alv1503/fila-abencerrajes-app/main/appcast.xml';
+    return Scaffold(
+      body: UpgradeAlert(
+        child: RefreshIndicator(
+          onRefresh: () async {
+            setState(() {});
+          },
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.only(bottom: 80),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeader(),
+                const SizedBox(height: 20),
 
-    final upgrader = Upgrader(
-      storeController: UpgraderStoreController(
-        onAndroid: () => UpgraderAppcastStore(
-          appcastURL: appcastURL,
-          osVersion: Version.parse('0.0.0'),
-        ),
-        oniOS: () => UpgraderAppcastStore(
-          appcastURL: appcastURL,
-          osVersion: Version.parse('0.0.0'),
-        ),
-      ),
-      debugLogging: true,
-      messages: UpgraderMessages(code: 'es'),
-    );
+                // 1. ANUNCIS
+                _buildAnnouncementsSection(),
+                const SizedBox(height: 20),
 
-    return UpgradeAlert(
-      upgrader: upgrader,
-      child: Scaffold(
-        appBar: AppBar(
-          // Usem el title per a fer la distribució personalitzada
-          // Deixem leading i actions buits per a tenir control total del Row
-          automaticallyImplyLeading: false,
-          title: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // --- GRUP ESQUERRA: UTILITATS DE PAGAMENT/COMANDES ---
-              Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.receipt_long, color: Colors.green),
-                    tooltip: 'Tickets',
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const TicketsPage(),
+                // 2. PRÒXIMS ESDEVENIMENTS
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "Pròxims Esdeveniments",
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.shopping_bag_outlined),
-                    tooltip: 'Encàrrecs',
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const OrderSheetsListPage(),
+                      TextButton(
+                        onPressed: () {
+                          DefaultTabController.of(context).animateTo(1);
+                        },
+                        child: const Text("Veure tot"),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                _buildUpcomingEventsSection(),
 
-              // --- GRUP DRETA: MÚSICA I DOCUMENTS ---
-              Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.music_note),
-                    tooltip: 'Música',
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const MusicLibraryPage(),
+                const SizedBox(height: 20),
+
+                // 3. VOTACIONS ACTIVES (AQUÍ ESTÀ L'ARREGALAT)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16.0,
+                    vertical: 8.0,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "Votacions Actives",
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.folder_copy_outlined),
-                    tooltip: 'Docs',
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const DocumentsPage(),
+                      TextButton(
+                        onPressed: () {
+                          // Navegar a la pestanya de votacions (index 2)
+                          DefaultTabController.of(context).animateTo(2);
+                        },
+                        child: const Text("Veure tot"),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Passem _isAdmin per a mostrar el botó de crear notícia ací
-              _buildBulletinBoardHeader(),
-              const SizedBox(height: 10),
-              _buildBulletinBoardList(),
+                ),
 
-              const SizedBox(height: 24),
+                StreamBuilder<QuerySnapshot>(
+                  stream: _firestoreService.votings.snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
 
-              const Text(
-                'Pròxims Esdeveniments',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              _buildEventsList(),
+                    final now = DateTime.now();
 
-              const SizedBox(height: 30),
+                    // Convertim i filtrem de manera segura
+                    var activeVotings = snapshot.data!.docs
+                        .map((doc) {
+                          try {
+                            return VotingModel.fromJson(doc);
+                          } catch (e) {
+                            return null; // Ignorem documents corruptes
+                          }
+                        })
+                        .where((v) {
+                          // Filtrem: no null i data futura
+                          return v != null && v.endDate.toDate().isAfter(now);
+                        })
+                        .cast<VotingModel>()
+                        .toList();
 
-              const Text(
-                'Votacions Actives',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              _buildVotingsList(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+                    // Ordenem: primer les que acaben abans
+                    activeVotings.sort(
+                      (a, b) => a.endDate.compareTo(b.endDate),
+                    );
 
-  // --- WIDGETS AUXILIARES ---
+                    // Limitem a 3
+                    final displayList = activeVotings.take(3).toList();
 
-  // NOU HEADER: Títol + Botó de crear notícia (Només Admin)
-  Widget _buildBulletinBoardHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        const Text(
-          'Taulell d\'Anuncis',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        if (_isAdmin)
-          IconButton(
-            icon: const Icon(Icons.add_circle, color: Colors.orangeAccent),
-            tooltip: "Afegir Notícia",
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const CreateAnnouncementPage(),
-              ),
+                    if (displayList.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: _buildEmptyCard(
+                          'No hi ha votacions actives.',
+                          isHorizontal: true,
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: displayList.length,
+                      itemBuilder: (context, index) {
+                        final voting = displayList[index];
+                        return Card(
+                          elevation: 2,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.all(12),
+                            leading: CircleAvatar(
+                              backgroundColor: Theme.of(
+                                context,
+                              ).primaryColor.withOpacity(0.1),
+                              child: Icon(
+                                getIconData(voting.iconName, type: 'voting'),
+                                color: Theme.of(context).primaryColor,
+                              ),
+                            ),
+                            title: Text(
+                              voting.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text(
+                              'Tanca: ${DateFormat('dd MMM HH:mm', 'ca').format(voting.endDate.toDate())}',
+                              style: TextStyle(color: Colors.grey[600]),
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      VotingDetailPage(votingId: voting.id),
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 30),
+              ],
             ),
           ),
-      ],
-    );
-  }
-
-  Widget _buildBulletinBoardList() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _firestoreService.getAnnouncementsStream(),
-      builder: (context, snapshot) {
-        List<Widget> cards = [];
-        if (_birthdaysToday.isNotEmpty) cards.add(_buildBirthdayCard());
-        if (snapshot.hasData) {
-          final announcements = snapshot.data!.docs
-              .map((doc) => AnnouncementModel.fromJson(doc))
-              .toList();
-          for (var notice in announcements) cards.add(_buildNoticeCard(notice));
-        }
-        if (cards.isEmpty) return const SizedBox.shrink();
-        return SizedBox(
-          height: 140,
-          child: ListView(scrollDirection: Axis.horizontal, children: cards),
-        );
-      },
-    );
-  }
-
-  Widget _buildBirthdayCard() {
-    return Container(
-      width: 280,
-      margin: const EdgeInsets.only(right: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Colors.purple, Colors.deepPurple],
         ),
-        borderRadius: BorderRadius.circular(12),
+      ),
+    );
+  }
+
+  // --- WIDGETS AUXILIARS ---
+
+  Widget _buildHeader() {
+    return Container(
+      // Aumentamos un poco el padding de abajo para que quepan los iconos
+      padding: const EdgeInsets.fromLTRB(20, 60, 20, 30),
+      decoration: BoxDecoration(
+        color: Theme.of(context).primaryColor,
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(30),
+          bottomRight: Radius.circular(30),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.purple.withOpacity(0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          // 1. FILA DEL PERFIL (Igual que antes)
+          Row(
             children: [
-              Icon(Icons.cake, color: Colors.white),
-              SizedBox(width: 8),
-              Text(
-                "Per molts anys!",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
+              CircleAvatar(
+                radius: 25,
+                backgroundColor: Colors.white,
+                child: Icon(
+                  Icons.person,
+                  size: 30,
+                  color: Theme.of(context).primaryColor,
                 ),
+              ),
+              const SizedBox(width: 15),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Hola, $_userName!",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Text(
+                    "Benvingut a l'App",
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: () {},
+                icon: const Icon(Icons.notifications, color: Colors.white),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: Center(
-              child: Text(
-                _birthdaysToday.join(", "),
+
+          const SizedBox(height: 25), // Separación
+          // 2. FILA DE ICONOS DE ACCESO RÁPIDO (Aquí es donde los querías)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildHeaderIconBtn(
+                Icons.description,
+                "Docs",
+                const DocumentsPage(),
+              ),
+              _buildHeaderIconBtn(
+                Icons.music_note,
+                "Música",
+                const MusicLibraryPage(),
+              ),
+              _buildHeaderIconBtn(
+                Icons.shopping_bag,
+                "Pedidos",
+                const OrderSheetsListPage(),
+              ), // Usa OrderSheetsPage
+              _buildHeaderIconBtn(
+                Icons.confirmation_number,
+                "Tickets",
+                const TicketsPage(),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Pequeña función auxiliar para diseñar los botones de arriba
+  Widget _buildHeaderIconBtn(IconData icon, String label, Widget page) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+      },
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2), // Fondo semitransparente
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: Colors.white, size: 24),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAnnouncementsSection() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestoreService.announcements
+          .orderBy('date', descending: true)
+          .limit(1)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          // Si no hay anuncios, mostramos un botón para crear si es admin
+          if (_isAdmin) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const CreateAnnouncementPage(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.add),
+                label: const Text("Crear primer anunci"),
+              ),
+            );
+          }
+          return const SizedBox.shrink();
+        }
+
+        final doc = snapshot.data!.docs.first;
+        final announcement = AnnouncementModel.fromJson(doc);
+
+        return Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.orange.shade300, Colors.orange.shade500],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.orange.withOpacity(0.3),
+                blurRadius: 10,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Chip(
+                    label: Text("AVÍS IMPORTANT"),
+                    backgroundColor: Colors.white,
+                    labelStyle: TextStyle(
+                      color: Colors.orange,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (_isAdmin)
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.white),
+                      onPressed: () async {
+                        await _firestoreService.announcements
+                            .doc(doc.id)
+                            .delete();
+                      },
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                announcement.title,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
-                textAlign: TextAlign.center,
-                maxLines: 2,
+              ),
+              const SizedBox(height: 5),
+              Text(
+                announcement.content,
+                style: const TextStyle(color: Colors.white),
+                maxLines: 3,
                 overflow: TextOverflow.ellipsis,
               ),
-            ),
-          ),
-          const Align(
-            alignment: Alignment.bottomRight,
-            child: Text(
-              "🎂 La Filà us felicita",
-              style: TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNoticeCard(AnnouncementModel notice) {
-    return Container(
-      width: 280,
-      margin: const EdgeInsets.only(right: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange.withOpacity(0.3)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  notice.title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (_isAdmin)
-                GestureDetector(
-                  onTap: () => _deleteAnnouncement(notice.id),
-                  child: const Icon(Icons.close, size: 16, color: Colors.red),
-                ),
             ],
           ),
-          const Divider(height: 12),
-          Expanded(
-            child: Text(
-              notice.content,
-              style: const TextStyle(fontSize: 14),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            DateFormat('dd/MM').format(notice.date.toDate()),
-            style: TextStyle(color: Colors.grey[500], fontSize: 11),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildEventsList() {
+  Widget _buildUpcomingEventsSection() {
     return SizedBox(
-      height: 160,
+      height: 220,
       child: StreamBuilder<QuerySnapshot>(
-        stream: _firestoreService.getUpcomingEventsStream(limit: 4),
+        // Ara sí funcionarà perquè hem afegit la funció al service
+        stream: _firestoreService.getEventsListStream(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
-            return _buildEmptyCard("No hi ha esdeveniments.");
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final now = DateTime.now();
+
+          // CORRECCIÓ PRINCIPAL AQUÍ:
           final events = snapshot.data!.docs
-              .map((doc) => EventModel.fromJson(doc))
+              .map((doc) {
+                // Usem fromJson, que és el nom correcte en el teu model
+                return EventModel.fromJson(doc);
+              })
+              .where((e) {
+                // Comprovem que la data existeix abans d'usar-la
+                return e.date.toDate().isAfter(
+                  now.subtract(const Duration(hours: 4)),
+                );
+              })
               .toList();
+
+          // Ordenem
+          events.sort((a, b) => a.date.compareTo(b.date));
+
+          if (events.isEmpty) {
+            return Center(
+              child: _buildEmptyCard(
+                "No hi ha esdeveniments propers",
+                isHorizontal: false,
+              ),
+            );
+          }
+
           return ListView.builder(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: events.length,
             itemBuilder: (context, index) {
               final event = events[index];
-              return _buildImageCard(
-                context,
-                title: event.title,
-                date: event.date.toDate(),
-                imageUrl: event.imageUrl,
-                iconName: event.iconName,
-                type: 'event',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => EventDetailPage(event: event),
-                  ),
-                ),
-              );
+              return _buildEventCard(event);
             },
           );
         },
@@ -401,115 +507,110 @@ class _HomeFeedPageState extends State<HomeFeedPage> {
     );
   }
 
-  Widget _buildVotingsList() {
-    return SizedBox(
-      height: 160,
-      child: StreamBuilder<QuerySnapshot>(
-        stream: _firestoreService.getUpcomingVotingsStream(limit: 4),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
-            return _buildEmptyCard("No hi ha votacions actives.");
-          final votings = snapshot.data!.docs
-              .map((doc) => VotingModel.fromJson(doc))
-              .toList();
-          return ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: votings.length,
-            itemBuilder: (context, index) {
-              final voting = votings[index];
-              return _buildImageCard(
-                context,
-                title: voting.title,
-                date: voting.endDate.toDate(),
-                imageUrl: voting.imageUrl,
-                iconName: voting.iconName,
-                type: 'voting',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => VotingDetailPage(votingId: voting.id),
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
+  // Cards Components
+  Widget _buildEventCard(EventModel event) {
+    bool hasImage = event.imageUrl != null && event.imageUrl!.isNotEmpty;
 
-  Widget _buildImageCard(
-    BuildContext context, {
-    required String title,
-    required DateTime date,
-    String? imageUrl,
-    String? iconName,
-    required String type,
-    required VoidCallback onTap,
-  }) {
-    final bool hasImage = imageUrl != null && imageUrl.isNotEmpty;
     return GestureDetector(
-      onTap: onTap,
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => EventDetailPage(event: event),
+          ),
+        );
+      },
       child: Container(
-        width: 280,
-        margin: const EdgeInsets.only(right: 12),
+        width: 160,
+        margin: const EdgeInsets.only(right: 16),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          color: Theme.of(context).cardColor,
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
           image: hasImage
               ? DecorationImage(
-                  image: NetworkImage(imageUrl!),
+                  image: NetworkImage(event.imageUrl!),
                   fit: BoxFit.cover,
-                  colorFilter: ColorFilter.mode(
-                    Colors.black.withOpacity(0.6),
-                    BlendMode.darken,
-                  ),
+                  opacity: 0.8,
                 )
               : null,
-          border: !hasImage ? Border.all(color: Colors.grey[800]!) : null,
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  type == 'event' ? Icons.calendar_today : Icons.how_to_vote,
-                  size: 14,
-                  color: hasImage
-                      ? Colors.white
-                      : Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  DateFormat(
-                    type == 'event' ? 'dd MMM - HH:mm' : 'Tanca: dd MMM',
-                    'ca',
-                  ).format(date),
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: hasImage
-                        ? Colors.white
-                        : Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-              ],
-            ),
-            Text(
-              title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: hasImage
-                    ? Colors.white
-                    : Theme.of(context).colorScheme.onSurface,
-              ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.1),
+              blurRadius: 5,
+              offset: const Offset(0, 2),
             ),
           ],
+        ),
+        child: Container(
+          // Gradient overlay for text readability if image exists
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: hasImage
+                ? LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                  )
+                : null,
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (!hasImage) ...[
+                Center(
+                  child: Icon(
+                    getIconData(event.iconName, type: 'event'),
+                    size: 40,
+                    color: Theme.of(context).primaryColor,
+                  ),
+                ),
+                const Spacer(),
+              ],
+              Text(
+                DateFormat('dd MMM - HH:mm', 'ca').format(event.date.toDate()),
+                style: TextStyle(
+                  color: hasImage ? Colors.white : Colors.grey[600],
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                event.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: hasImage ? Colors.white : Colors.black,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(
+                    Icons.location_on,
+                    size: 12,
+                    color: hasImage ? Colors.white70 : Colors.grey,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      event.location,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: hasImage ? Colors.white70 : Colors.grey,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -517,16 +618,16 @@ class _HomeFeedPageState extends State<HomeFeedPage> {
 
   Widget _buildEmptyCard(String text, {bool isHorizontal = true}) {
     return Container(
-      width: isHorizontal ? double.infinity : null,
-      height: isHorizontal ? 100 : null,
+      width: isHorizontal ? double.infinity : 200,
+      height: 100,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.grey[900],
+        color: Colors.grey[100],
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[800]!),
+        border: Border.all(color: Colors.grey[300]!),
       ),
       child: Center(
-        child: Text(text, style: const TextStyle(color: Colors.grey)),
+        child: Text(text, style: TextStyle(color: Colors.grey[600])),
       ),
     );
   }

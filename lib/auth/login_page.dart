@@ -2,15 +2,14 @@
 import 'package:abenceapp/services/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:abenceapp/auth/activate_account_page.dart';
-
-// Eliminamos el import de auth_gate si no se usa explícitamente dentro,
-// aunque si lo usas para algo más, déjalo.
+import 'package:flutter/foundation.dart'
+    show kIsWeb; // <--- NECESARIO PARA DETECTAR WEB
+import 'package:url_launcher/url_launcher.dart'; // <--- PARA ABRIR EL APK
 
 class LoginPage extends StatefulWidget {
-  // Hacemos que onTap sea opcional quitando el 'required'
   final void Function()? onTap;
 
-  const LoginPage({super.key, this.onTap}); // <--- CORREGIDO AQUÍ
+  const LoginPage({super.key, this.onTap});
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -30,10 +29,9 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void login() async {
-    // Validació bàsica
     if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Si us plau, ompli tots els camps")),
+        const SnackBar(content: Text("Per favor, ompli tots els camps")),
       );
       return;
     }
@@ -47,8 +45,6 @@ class _LoginPageState extends State<LoginPage> {
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
-      // Si el login és correcte, el StreamBuilder (a AuthGate o Main)
-      // redirigirà automàticament a la Home. No cal fer Navigator.
     } catch (e) {
       if (mounted) {
         showDialog(
@@ -84,15 +80,13 @@ class _LoginPageState extends State<LoginPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // LOGO
               Icon(
-                Icons.security_outlined, // O la teua icona de la filà
+                Icons.security_outlined,
                 size: 100,
                 color: Theme.of(context).colorScheme.primary,
               ),
               const SizedBox(height: 50),
 
-              // MISSATGE DE BENVINGUDA
               Text(
                 "Benvingut de nou, Abencerraje!",
                 style: TextStyle(
@@ -102,7 +96,6 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 25),
 
-              // EMAIL TEXTFIELD
               TextField(
                 controller: _emailController,
                 decoration: InputDecoration(
@@ -122,12 +115,11 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 10),
 
-              // PASSWORD TEXTFIELD
               TextField(
                 controller: _passwordController,
                 obscureText: true,
                 decoration: InputDecoration(
-                  hintText: "Contrasenya (DNI amb lletra)",
+                  hintText: "Contrasenya",
                   prefixIcon: const Icon(Icons.lock),
                   enabledBorder: OutlineInputBorder(
                     borderSide: BorderSide(
@@ -143,7 +135,6 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 25),
 
-              // LOGIN BUTTON
               SizedBox(
                 width: double.infinity,
                 height: 60,
@@ -165,7 +156,6 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 24),
 
-              // ENLLAÇ PER A ACTIVAR COMPTE
               Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -191,6 +181,45 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ],
               ),
+
+              // --- NUEVO BOTÓN: SOLO VISIBLE EN WEB ---
+              if (kIsWeb) ...[
+                const SizedBox(height: 40),
+                const Divider(),
+                const SizedBox(height: 10),
+                TextButton.icon(
+                  onPressed: () async {
+                    // Busca el archivo en la misma carpeta donde está la web alojada
+                    final Uri url = Uri.parse('/abencerrajes.apk');
+                    if (!await launchUrl(url)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('No se pudo descargar el APK'),
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.android, color: Colors.green),
+                  label: const Text(
+                    "¿Tens Android? Descarrega l'App Nativa",
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 15,
+                    ),
+                    backgroundColor: Colors.green.withOpacity(0.1),
+                  ),
+                ),
+                const Text(
+                  "(Recomanat per a Android)",
+                  style: TextStyle(fontSize: 10, color: Colors.grey),
+                ),
+              ],
             ],
           ),
         ),

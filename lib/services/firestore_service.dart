@@ -99,13 +99,17 @@ class FirestoreService {
     String? telefon,
     String? adreca,
     String? descripcio,
+    String? fotoUrl,
   }) async {
     Map<String, dynamic> data = {};
     if (mote != null) data['mote'] = mote;
     if (telefon != null) data['telefon'] = telefon;
     if (adreca != null) data['adreca'] = adreca;
     if (descripcio != null) data['descripcio'] = descripcio;
-
+    if (fotoUrl != null) {
+      data['fotoUrl'] =
+          fotoUrl; // Usamos 'fotoUrl' para que coincida con tu MemberModel
+    }
     if (data.isNotEmpty) {
       await members.doc(uid).update(data);
     }
@@ -450,6 +454,25 @@ class FirestoreService {
         .collection('votes')
         .doc(_currentUser!.uid)
         .set(voteData);
+  }
+
+  /// Envia el vot. [voteData] pot ser un String (opció única) o List (múltiple).
+  Future<void> submitVote(String votingId, String uid, dynamic voteData) async {
+    await votings.doc(votingId).update({
+      'results.$uid': voteData, // Això actualitza només la clau d'aquest usuari
+    });
+  }
+
+  /// Esborra el vot de l'usuari actual.
+  Future<void> removeVote(String votingId, String uid) async {
+    await votings.doc(votingId).update({
+      'results.$uid': FieldValue.delete(), // Això elimina l'entrada del mapa
+    });
+  }
+
+  // Afegeix aquesta funció dins de FirestoreService
+  Stream<QuerySnapshot> getEventsListStream() {
+    return events.orderBy('date', descending: false).snapshots();
   }
 
   // ===========================================================================

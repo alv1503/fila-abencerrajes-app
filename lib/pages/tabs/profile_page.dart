@@ -26,8 +26,9 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _needsRefresh = false;
 
   Future<void> _openDownloadPage() async {
+    // CAMBIAR ESTO LUEGO POR LA SOLUCIÓN QUE ELIJAS
     final Uri url = Uri.parse(
-      'https://github.com/alv1503/fila-abencerrajes-app/releases',
+      'https://abencerrajes-app.web.app/abencerrajes.apk',
     );
     try {
       if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
@@ -183,35 +184,21 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   const SizedBox(height: 20),
 
-                  // --- AQUÍ ESTÁ EL BOTÓN DE ACTUALIZAR ---
                   _buildInfoCard(
                     context,
                     title: 'Aplicació',
                     children: [
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(
-                          Icons.system_update,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        title: const Text('Buscar Actualitzacions'),
-                        subtitle: const Text('Obrir pàgina de descàrregues'),
-                        trailing: const Icon(
-                          Icons.open_in_new,
-                          size: 18,
-                          color: Colors.grey,
-                        ),
-                        onTap: _openDownloadPage,
+                      _ProfileInfoTile(
+                        icon: Icons.system_update,
+                        title: 'Buscar Actualitzacions',
+                        subtitle: 'Obrir pàgina de descàrregues',
+                        onTap: _openDownloadPage, // Aquí sí usamos onTap
                       ),
                       const Divider(),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(
-                          Icons.info_outline,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        title: const Text('Versió Instal·lada'),
-                        subtitle: const Text('1.0.2'),
+                      _ProfileInfoTile(
+                        icon: Icons.info_outline,
+                        title: 'Versió Instal·lada',
+                        subtitle: '1.0.2',
                       ),
                     ],
                   ),
@@ -275,6 +262,8 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
   }
+
+  // --- WIDGETS AUXILIARES (Restaurados) ---
 
   Widget _buildHeader(BuildContext context, MemberModel member) {
     return Column(
@@ -357,12 +346,12 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // --- CORRECCIÓN FINAL: onTap AHORA ES OPCIONAL (nullable) ---
+  // AQUÍ ESTÁ EL ARREGLO: onTap es opcional (?)
   Widget _ProfileInfoTile({
     required IconData icon,
     required String title,
     required String subtitle,
-    VoidCallback? onTap, // <--- El "?" es la clave para que no sea required
+    VoidCallback? onTap, // <--- El "?" permite que sea null
   }) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
@@ -372,6 +361,9 @@ class _ProfilePageState extends State<ProfilePage> {
         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
       ),
       subtitle: Text(subtitle, style: const TextStyle(fontSize: 16)),
+      trailing: onTap != null
+          ? const Icon(Icons.open_in_new, size: 18, color: Colors.grey)
+          : null,
       onTap: onTap,
     );
   }

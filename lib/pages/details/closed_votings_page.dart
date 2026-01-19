@@ -1,99 +1,94 @@
 // lib/pages/details/closed_votings_page.dart
 import 'package:abenceapp/models/voting_model.dart';
-import 'package:abenceapp/pages/details/voting_detail_page.dart';
 import 'package:abenceapp/services/firestore_service.dart';
 import 'package:abenceapp/utils/icon_helper.dart';
+import 'package:abenceapp/pages/details/voting_detail_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-/// Aquesta pantalla és només per a Administradors.
-///
-/// Mostra una llista de les votacions que s'han tancat
-/// en les últimes 48 hores, per a poder consultar els resultats.
-class ClosedVotingsPage extends StatelessWidget {
+class ClosedVotingsPage extends StatefulWidget {
   const ClosedVotingsPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final FirestoreService firestoreService = FirestoreService();
+  State<ClosedVotingsPage> createState() => _ClosedVotingsPageState();
+}
 
+class _ClosedVotingsPageState extends State<ClosedVotingsPage> {
+  final FirestoreService _firestoreService = FirestoreService();
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Votacions Tancades')),
-      // Utilitzem un StreamBuilder per a llegir la nova funció del servei.
+      appBar: AppBar(title: const Text('Històric de Votacions')),
       body: StreamBuilder<QuerySnapshot>(
-        stream: firestoreService.getRecentlyClosedVotingsStream(),
+        // Demanem TOTES les votacions
+        stream: _firestoreService.votings
+            .orderBy('endDate', descending: true)
+            .snapshots(),
         builder: (context, snapshot) {
-          // Casos de càrrega, error o dades buides.
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
           }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16.0),
-                child: Text(
-                  'No s\'ha tancat cap votació en les últimes 48 hores.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 18, color: Colors.grey),
-                ),
-              ),
-            );
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
           }
 
-          // Convertim els documents al nostre model.
-          final List<VotingModel> votings = snapshot.data!.docs
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text('No hi ha votacions registrades.'));
+          }
+
+          // Filtrem manualment les que ja han passat (Closed)
+          // Això és més segur que fer-ho en la query per evitar problemes d'índexs
+          final now = DateTime.now();
+          final allDocs = snapshot.data!.docs;
+
+          final closedVotings = allDocs
+              .where((doc) {
+                try {
+                  // Usem el model segur que hem creat abans
+                  final voting = VotingModel.fromJson(doc);
+                  return voting.endDate.toDate().isBefore(now);
+                } catch (e) {
+                  // Si un document està tan malament que falla, l'ignorem
+                  return false;
+                }
+              })
               .map((doc) => VotingModel.fromJson(doc))
               .toList();
 
-          // Construïm la llista.
+          if (closedVotings.isEmpty) {
+            return const Center(child: Text('No hi ha votacions passades.'));
+          }
+
           return ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
-            itemCount: votings.length,
+            itemCount: closedVotings.length,
+            padding: const EdgeInsets.all(16),
             itemBuilder: (context, index) {
-              final voting = votings[index];
-              // Formategem la data de *tancament*.
-              final formattedDate = DateFormat(
-                'd MMMM, yyyy - HH:mm',
-                'ca',
+              final voting = closedVotings[index];
+              final dateStr = DateFormat(
+                'dd/MM/yyyy',
               ).format(voting.endDate.toDate());
 
               return Card(
-                margin: const EdgeInsets.symmetric(vertical: 5.0),
                 elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                margin: const EdgeInsets.only(bottom: 12),
                 child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16.0,
-                    vertical: 8.0,
-                  ),
-                  // Icona dinàmica
                   leading: CircleAvatar(
-                    backgroundColor:
-                        Colors.grey[700], // Un color diferent per a l'arxiu
+                    backgroundColor: Colors.grey[300],
                     child: Icon(
                       getIconData(voting.iconName, type: 'voting'),
-                      color: Colors.white,
+                      color: Colors.grey[700],
                     ),
                   ),
                   title: Text(
                     voting.title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      decoration: TextDecoration.lineThrough, // Ratllem el text
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  subtitle: Text('Tancada el: $formattedDate'),
+                  subtitle: Text('Finalitzada el: $dateStr'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    // En fer clic, anem a la pàgina de detall que ja tenim.
-                    // Aquesta pàgina ja sap com mostrar els resultats
-                    // d'una votació caducada (gràcies al bug que vam arreglar!).
                     Navigator.push(
                       context,
                       MaterialPageRoute(

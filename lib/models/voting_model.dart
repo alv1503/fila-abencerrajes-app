@@ -13,7 +13,7 @@ class VotingModel {
   final String? imageUrl;
   final Map<String, dynamic> results;
 
-  // --- NOU: Document Adjunt Temporal ---
+  // Documents adjunts
   final String? attachedFileUrl;
   final String? attachedFileName;
 
@@ -33,20 +33,34 @@ class VotingModel {
   });
 
   factory VotingModel.fromJson(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+    // 1. Obtenim les dades protegint-nos si el document és null
+    Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
+
+    // 2. BLINDATGE DE RESULTATS (Aquí sol estar l'error en vots antics)
+    // Comprovem si 'results' és realment un Mapa. Si és una Llista o null, posem {}.
+    Map<String, dynamic> safeResults = {};
+    var rawResults = data['results'];
+
+    if (rawResults is Map) {
+      try {
+        safeResults = Map<String, dynamic>.from(rawResults);
+      } catch (e) {
+        // Si falla la conversió, deixem el mapa buit
+        safeResults = {};
+      }
+    }
 
     return VotingModel(
       id: doc.id,
-      title: data['title'] ?? '',
+      title: data['title'] ?? 'Votació sense títol',
       description: data['description'] ?? '',
       endDate: data['endDate'] ?? Timestamp.now(),
       options: List<String>.from(data['options'] ?? []),
-      creatorMote: data['creatorMote'] ?? '',
-      results: data['results'] ?? {},
+      creatorMote: data['creatorMote'] ?? 'Anònim',
+      results: safeResults, // <--- Usem la versió segura
       iconName: data['iconName'],
       allowMultipleChoices: data['allowMultipleChoices'] ?? false,
       imageUrl: data['imageUrl'],
-      // Mapeig dels nous camps
       attachedFileUrl: data['attachedFileUrl'],
       attachedFileName: data['attachedFileName'],
     );

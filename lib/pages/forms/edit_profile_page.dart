@@ -1,13 +1,16 @@
 // lib/pages/forms/edit_profile_page.dart
+import 'dart:io'; // Per a mòbil (File)
+import 'dart:typed_data'; // Per a Web (Bytes)
+
 import 'package:abenceapp/models/user_model.dart';
 import 'package:abenceapp/services/firestore_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart'; // NECESSARI PER A PUJAR FOTOS
+import 'package:flutter/foundation.dart' show kIsWeb; // Per a saber si és Web
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart'; // NECESSARI PER A OBRIR GALERIA
 
 /// Un formulari [StatefulWidget] per a editar el perfil de l'usuari loguejat.
-///
-/// Rep el [MemberModel] actual de l'usuari per a omplir
-/// inicialment els camps del formulari.
 class EditProfilePage extends StatefulWidget {
   final MemberModel currentMember;
 
@@ -30,13 +33,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
   late TextEditingController _adrecaController;
   late TextEditingController _descripcioController;
 
+  // --- VARIABLES NOVES PER A LA FOTO ---
+  XFile? _imageFile; // L'arxiu seleccionat (comú)
+  Uint8List? _webImage; // Els bytes de la imatge (Només per a Web)
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
     // Inicialitzem els controladors amb les dades actuals
-    // que hem rebut del widget [currentMember].
     _moteController = TextEditingController(text: widget.currentMember.mote);
     _telefonController = TextEditingController(
       text: widget.currentMember.telefon,
@@ -59,7 +64,40 @@ class _EditProfilePageState extends State<EditProfilePage> {
     super.dispose();
   }
 
-  /// Valida el formulari i actualitza les dades del perfil a Firestore.
+  // --- 1. FUNCIÓ PER A SELECCIONAR IMATGE (COMPATIBLE WEB I MÒBIL) ---
+  Future<void> _pickImage() async {
+    final ImagePicker picker = ImagePicker();
+
+    try {
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 50, // Comprimim un poc per a pujar ràpid
+        maxWidth: 800, // Limitem l'ample
+      );
+
+      if (image != null) {
+        if (kIsWeb) {
+          // En Web llegim els bytes per a poder mostrar la previsualització
+          final f = await image.readAsBytes();
+          setState(() {
+            _webImage = f;
+            _imageFile = image;
+          });
+        } else {
+          // En Android/iOS usem l'arxiu normal
+          setState(() {
+            _imageFile = image;
+          });
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error al obrir galeria: $e')));
+    }
+  }
+
+  // --- 2. FUNCIÓ PER A GUARDAR I PUJAR A FIREBASE ---
   Future<void> _saveProfile() async {
     // 1. Validar el formulari
     if (!_formKey.currentState!.validate()) {
@@ -71,7 +109,32 @@ class _EditProfilePageState extends State<EditProfilePage> {
       _isLoading = true;
     });
 
+    String? finalFotoUrl = widget.currentMember.fotoUrl;
+
     try {
+      // A) Si hi ha imatge nova seleccionada, la pugem a Storage
+      if (_imageFile != null) {
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('profile_images')
+            .child('$_userId.jpg'); // Usem l'ID de l'usuari com a nom
+
+        if (kIsWeb) {
+          // PUJADA WEB: Usem putData (bytes)
+          final bytes = await _imageFile!.readAsBytes();
+          await storageRef.putData(
+            bytes,
+            SettableMetadata(contentType: 'image/jpeg'),
+          );
+        } else {
+          // PUJADA ANDROID: Usem putFile (arxiu)
+          await storageRef.putFile(File(_imageFile!.path));
+        }
+
+        // Obtenim la URL pública final de la imatge pujada
+        finalFotoUrl = await storageRef.getDownloadURL();
+      }
+
       // 3. Crida al servei de Firestore per a actualitzar les dades
       await _firestoreService.updateMemberProfile(
         uid: _userId,
@@ -79,6 +142,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
         telefon: _telefonController.text.trim(),
         adreca: _adrecaController.text.trim(),
         descripcio: _descripcioController.text.trim(),
+        fotoUrl:
+            finalFotoUrl, // Passem la URL nova (o la vella si no ha canviat)
       );
 
       // 4. Si té èxit, tanca el formulari i mostra missatge
@@ -111,6 +176,25 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
+  // --- 3. HELPER PER A SABER QUINA FOTO MOSTRAR ---
+  ImageProvider? _getAvatarImage() {
+    // 1. Si hem triat foto nova en WEB
+    if (kIsWeb && _webImage != null) {
+      return MemoryImage(_webImage!);
+    }
+    // 2. Si hem triat foto nova en MÒBIL
+    else if (!kIsWeb && _imageFile != null) {
+      return FileImage(File(_imageFile!.path));
+    }
+    // 3. Si no hem triat res, mostrem la que ja tenia l'usuari (si en té)
+    else if (widget.currentMember.fotoUrl != null &&
+        widget.currentMember.fotoUrl!.isNotEmpty) {
+      return NetworkImage(widget.currentMember.fotoUrl!);
+    }
+    // 4. Si no té res, retornem null (es mostrarà la icona per defecte)
+    return null;
+  }
+
   /// Funció de validació simple.
   String? _validateNotEmpty(String? value) {
     if (value == null || value.trim().isEmpty) {
@@ -130,6 +214,46 @@ class _EditProfilePageState extends State<EditProfilePage> {
               child: ListView(
                 padding: const EdgeInsets.all(16.0),
                 children: [
+                  // --- SECCIÓ FOTO DE PERFIL (NOU) ---
+                  Center(
+                    child: Stack(
+                      alignment: Alignment.bottomRight,
+                      children: [
+                        GestureDetector(
+                          onTap: _pickImage, // Al tocar la foto, obrim galeria
+                          child: CircleAvatar(
+                            radius: 60,
+                            backgroundColor: Colors.grey[200],
+                            backgroundImage: _getAvatarImage(),
+                            child: (_getAvatarImage() == null)
+                                ? const Icon(
+                                    Icons.person,
+                                    size: 60,
+                                    color: Colors.grey,
+                                  )
+                                : null,
+                          ),
+                        ),
+                        // Botonet blau amb la càmera
+                        Container(
+                          decoration: const BoxDecoration(
+                            color: Colors.blue,
+                            shape: BoxShape.circle,
+                          ),
+                          child: IconButton(
+                            icon: const Icon(
+                              Icons.camera_alt,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                            onPressed: _pickImage,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+
                   // --- Camp de Mote ---
                   TextFormField(
                     controller: _moteController,
@@ -173,7 +297,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       icon: Icon(Icons.description),
                     ),
                     maxLines: 4,
-                    // Aquest camp pot estar buit, per tant, no té validador.
                   ),
                   const SizedBox(height: 32),
 
