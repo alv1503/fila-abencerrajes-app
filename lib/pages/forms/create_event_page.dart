@@ -1,11 +1,9 @@
 // lib/pages/forms/create_event_page.dart
-import 'dart:io';
+
 import 'package:abenceapp/services/firestore_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:abenceapp/utils/icon_helper.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:file_picker/file_picker.dart'; // Necessari
 
 class CreateEventPage extends StatefulWidget {
   const CreateEventPage({super.key});
@@ -26,15 +24,9 @@ class _CreateEventPageState extends State<CreateEventPage> {
   final List<TextEditingController> _menuControllers = [];
 
   DateTime? _startDate;
-  DateTime? _endDate;
+  DateTime? _endDate; // Opcional
   bool _isLoading = false;
-  String _selectedIconName = 'default';
-
-  File? _selectedImage;
-
-  // --- VARIABLES PER AL PDF ADJUNT ---
-  File? _attachedFile;
-  String? _attachedFileName;
+  String _selectedIconName = 'default'; // Icono por defecto
 
   @override
   void dispose() {
@@ -42,37 +34,61 @@ class _CreateEventPageState extends State<CreateEventPage> {
     _descriptionController.dispose();
     _locationController.dispose();
     _dressCodeController.dispose();
-    for (var c in _menuControllers) {
-      c.dispose();
+    for (var controller in _menuControllers) {
+      controller.dispose();
     }
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 80,
-    );
-    if (image != null) setState(() => _selectedImage = File(image.path));
-  }
+  // --- GESTIÓN DE FECHAS ---
+  Future<void> _pickDateTime(bool isStart) async {
+    final now = DateTime.now();
+    final initialDate = isStart 
+        ? (_startDate ?? now) 
+        : (_endDate ?? _startDate ?? now);
 
-  // --- SELECCIONAR PDF ---
-  Future<void> _pickPdf() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf'],
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: now.subtract(const Duration(days: 1)),
+      lastDate: DateTime(now.year + 2),
     );
-    if (result != null && result.files.single.path != null) {
-      setState(() {
-        _attachedFile = File(result.files.single.path!);
-        _attachedFileName = result.files.single.name;
-      });
+
+    if (pickedDate != null && mounted) {
+      final TimeOfDay? pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(initialDate),
+      );
+
+      if (pickedTime != null) {
+        final DateTime finalDateTime = DateTime(
+          pickedDate.year,
+          pickedDate.month,
+          pickedDate.day,
+          pickedTime.hour,
+          pickedTime.minute,
+        );
+
+        setState(() {
+          if (isStart) {
+            _startDate = finalDateTime;
+            // Si la fecha final es anterior a la nueva inicial, la reseteamos
+            if (_endDate != null && _endDate!.isBefore(_startDate!)) {
+              _endDate = null;
+            }
+          } else {
+            _endDate = finalDateTime;
+          }
+        });
+      }
     }
   }
 
+  // --- GESTIÓN DE MENÚ ---
   void _addMenuOption() {
-    setState(() => _menuControllers.add(TextEditingController()));
+    setState(() {
+      _menuControllers.add(TextEditingController());
+    });
   }
 
   void _removeMenuOption(int index) {
@@ -82,395 +98,260 @@ class _CreateEventPageState extends State<CreateEventPage> {
     });
   }
 
-  Future<void> _selectStartDate(BuildContext context) async {
-    final DateTime? pickedDate = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now().add(const Duration(days: 1)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (pickedDate == null) return;
-    final TimeOfDay? pickedTime = await showTimePicker(
-      context: context,
-      initialTime: const TimeOfDay(hour: 21, minute: 0),
-    );
-    if (pickedTime == null) return;
-    setState(() {
-      _startDate = DateTime(
-        pickedDate.year,
-        pickedDate.month,
-        pickedDate.day,
-        pickedTime.hour,
-        pickedTime.minute,
-      );
-      if (_endDate != null && _endDate!.isBefore(_startDate!)) _endDate = null;
-    });
-  }
-
-  Future<void> _selectEndDate(BuildContext context) async {
-    if (_startDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Primer selecciona la data d\'inici.')),
-      );
-      return;
-    }
-    final DateTime? pickedDate = await showDatePicker(
-      context: context,
-      initialDate: _startDate!,
-      firstDate: _startDate!,
-      lastDate: _startDate!.add(const Duration(days: 7)),
-    );
-    if (pickedDate == null) return;
-    final TimeOfDay? pickedTime = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(
-        _startDate!.add(const Duration(hours: 2)),
-      ),
-    );
-    if (pickedTime == null) return;
-    final tempEndDate = DateTime(
-      pickedDate.year,
-      pickedDate.month,
-      pickedDate.day,
-      pickedTime.hour,
-      pickedTime.minute,
-    );
-    if (tempEndDate.isBefore(_startDate!)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('La data de fi ha de ser posterior a l\'inici.'),
-        ),
-      );
-      return;
-    }
-    setState(() => _endDate = tempEndDate);
-  }
-
+  // --- GUARDAR EVENTO ---
   Future<void> _saveEvent() async {
     if (!_formKey.currentState!.validate()) return;
     if (_startDate == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Falta data d\'inici.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Has de seleccionar una data d\'inici')),
+      );
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
-      // 1. Pujar Imatge (si n'hi ha)
-      String? uploadedImageUrl;
-      if (_selectedImage != null) {
-        uploadedImageUrl = await _firestoreService.uploadCoverImage(
-          _selectedImage!,
-          'event_covers',
-        );
-      }
-
-      // 2. Pujar PDF (si n'hi ha)
-      String? uploadedPdfUrl;
-      if (_attachedFile != null) {
-        // Reutilitzem la funció de pujar PDF, però els posarà a 'documents/'.
-        // Si vols una carpeta separada, hauries de crear una altra funció, però per ara serveix.
-        uploadedPdfUrl = await _firestoreService.uploadPdfFile(_attachedFile!);
-      }
-
-      final List<String> menuOptions = _menuControllers
+      // Recopilar opciones de menú limpias
+      List<String> menuOptions = _menuControllers
           .map((c) => c.text.trim())
           .where((text) => text.isNotEmpty)
           .toList();
 
-      await _firestoreService.addEvent(
-        _titleController.text.trim(),
-        _descriptionController.text.trim(),
-        _locationController.text.trim(),
-        _startDate!,
-        iconName: _selectedIconName,
+      await _firestoreService.createEvent(
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
+        location: _locationController.text.trim(),
+        date: _startDate!,
         endDate: _endDate,
-        dressCode: _dressCodeController.text.trim().isEmpty
-            ? null
-            : _dressCodeController.text.trim(),
+        dressCode: _dressCodeController.text.trim().isNotEmpty 
+            ? _dressCodeController.text.trim() 
+            : null,
         menuOptions: menuOptions,
-        imageUrl: uploadedImageUrl,
-        // Passem els adjunts
-        attachedFileUrl: uploadedPdfUrl,
-        attachedFileName: _attachedFileName,
+        iconName: _selectedIconName, // Solo guardamos el nombre del icono
+        imageFile: null, // Ya no enviamos imagen
+        attachedFile: null, // Ya no enviamos PDF
+        attachedFileName: null,
       );
 
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Esdeveniment creat!'),
-            backgroundColor: Colors.green,
-          ),
+          const SnackBar(content: Text('Esdeveniment creat correctament!')),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error creant esdeveniment: $e')),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Crear Nou Esdeveniment')),
+      appBar: AppBar(title: const Text('Nou Esdeveniment')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Form(
               key: _formKey,
               child: ListView(
-                padding: const EdgeInsets.all(16.0),
+                padding: const EdgeInsets.all(16),
                 children: [
-                  GestureDetector(
-                    onTap: _pickImage,
-                    child: Container(
-                      height: 200,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[900],
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey),
-                        image: _selectedImage != null
-                            ? DecorationImage(
-                                image: FileImage(_selectedImage!),
-                                fit: BoxFit.cover,
-                              )
-                            : null,
-                      ),
-                      child: _selectedImage == null
-                          ? const Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.add_a_photo,
-                                  size: 50,
-                                  color: Colors.grey,
-                                ),
-                                SizedBox(height: 8),
-                                Text(
-                                  "Pujar Foto de Portada (Opcional)",
-                                  style: TextStyle(color: Colors.grey),
-                                ),
-                              ],
-                            )
-                          : null,
+                  // 1. Icono Principal
+                  Center(
+                    child: Column(
+                      children: [
+                        Text("Icona de l'esdeveniment", style: TextStyle(color: Colors.grey[600])),
+                        const SizedBox(height: 10),
+                        InkWell(
+                          onTap: () async {
+                            // Mostrar selector de iconos simple
+                             // Nota: Asumo que tienes una lista de iconos. 
+                             // Si no quieres complicarte, usa un set predefinido aquí mismo
+                            _showIconPicker();
+                          },
+                          child: CircleAvatar(
+                            radius: 40,
+                            backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+                            child: Icon(
+                              getIconData(_selectedIconName, type: 'event'),
+                              size: 40,
+                              color: Theme.of(context).primaryColor,
+                            ),
+                          ),
+                        ),
+                        const Text("Prem per canviar", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      ],
                     ),
                   ),
-                  if (_selectedImage != null)
-                    TextButton(
-                      onPressed: () => setState(() => _selectedImage = null),
-                      child: const Text(
-                        "Eliminar foto",
-                        style: TextStyle(color: Colors.red),
-                      ),
-                    ),
+                  const SizedBox(height: 20),
 
-                  const SizedBox(height: 16),
-
-                  // --- BOTÓ PUJAR PDF ADJUNT ---
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: ListTile(
-                      leading: const Icon(
-                        Icons.attach_file,
-                        color: Colors.blue,
-                      ),
-                      title: Text(
-                        _attachedFileName ?? 'Adjuntar PDF (Opcional)',
-                      ),
-                      subtitle: _attachedFileName != null
-                          ? const Text("Document temporal de l'esdeveniment")
-                          : null,
-                      trailing: _attachedFile != null
-                          ? IconButton(
-                              icon: const Icon(Icons.close, color: Colors.red),
-                              onPressed: () => setState(() {
-                                _attachedFile = null;
-                                _attachedFileName = null;
-                              }),
-                            )
-                          : const Icon(Icons.add),
-                      onTap: _pickPdf,
-                    ),
-                  ),
-
-                  const SizedBox(height: 24),
-
+                  // 2. Datos Básicos
                   TextFormField(
                     controller: _titleController,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Títol',
-                      prefixIcon: Icon(Icons.title),
-                    ),
-                    validator: (v) => v!.isEmpty ? 'Camp obligatori' : null,
+                    decoration: const InputDecoration(labelText: 'Títol', border: OutlineInputBorder()),
+                    validator: (v) => v == null || v.isEmpty ? 'Necessari' : null,
                   ),
                   const SizedBox(height: 16),
+                  
                   TextFormField(
                     controller: _locationController,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Ubicació',
-                      prefixIcon: Icon(Icons.location_on_outlined),
-                    ),
-                    validator: (v) => v!.isEmpty ? 'Camp obligatori' : null,
+                    decoration: const InputDecoration(labelText: 'Ubicació', border: OutlineInputBorder(), prefixIcon: Icon(Icons.location_on)),
+                    validator: (v) => v == null || v.isEmpty ? 'Necessari' : null,
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _dressCodeController,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Vestimenta',
-                      prefixIcon: Icon(Icons.checkroom),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _descriptionController,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Descripció',
-                      prefixIcon: Icon(Icons.description_outlined),
-                    ),
-                    maxLines: 3,
-                    validator: (v) => v!.isEmpty ? 'Camp obligatori' : null,
-                  ),
-                  const SizedBox(height: 24),
 
+                  // 3. Fechas
                   Row(
                     children: [
                       Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => _selectStartDate(context),
-                          child: Text(
-                            _startDate == null
-                                ? 'INICI'
-                                : DateFormat('dd/MM HH:mm').format(_startDate!),
+                        child: InkWell(
+                          onTap: () => _pickDateTime(true),
+                          child: InputDecorator(
+                            decoration: const InputDecoration(labelText: 'Inici', border: OutlineInputBorder(), prefixIcon: Icon(Icons.calendar_today)),
+                            child: Text(_startDate != null ? dateFormat.format(_startDate!) : 'Seleccionar'),
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 10),
                       Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => _selectEndDate(context),
-                          child: Text(
-                            _endDate == null
-                                ? 'FI (+2h)'
-                                : DateFormat('dd/MM HH:mm').format(_endDate!),
+                        child: InkWell(
+                          onTap: () => _pickDateTime(false),
+                          child: InputDecorator(
+                            decoration: const InputDecoration(labelText: 'Final (Opcional)', border: OutlineInputBorder()),
+                            child: Text(_endDate != null ? dateFormat.format(_endDate!) : '-'),
                           ),
                         ),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 16),
 
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Opcions de Menú',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  TextFormField(
+                    controller: _descriptionController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(labelText: 'Descripció', border: OutlineInputBorder(), alignLabelWithHint: true),
+                    validator: (v) => v == null || v.isEmpty ? 'Necessari' : null,
                   ),
+                  const SizedBox(height: 16),
+
+                  TextFormField(
+                    controller: _dressCodeController,
+                    decoration: const InputDecoration(labelText: 'Dress Code (Opcional)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.checkroom)),
+                  ),
+
+                  // 4. Menú
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Opcions de Menú', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      IconButton(onPressed: _addMenuOption, icon: const Icon(Icons.add_circle, color: Colors.green)),
+                    ],
+                  ),
+                  if (_menuControllers.isEmpty)
+                    const Text('No hi ha opcions de menú.', style: TextStyle(color: Colors.grey)),
+                  
                   ..._menuControllers.asMap().entries.map((entry) {
-                    return Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: entry.value,
-                            textCapitalization: TextCapitalization.sentences,
-                            decoration: InputDecoration(
-                              labelText: 'Opció ${entry.key + 1}',
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: entry.value,
+                              decoration: InputDecoration(labelText: 'Opció ${entry.key + 1}', border: const OutlineInputBorder()),
                             ),
                           ),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            color: Colors.red,
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _removeMenuOption(entry.key),
                           ),
-                          onPressed: () => _removeMenuOption(entry.key),
-                        ),
-                      ],
+                        ],
+                      ),
                     );
                   }),
-                  TextButton.icon(
-                    onPressed: _addMenuOption,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Afegir Opció'),
-                  ),
 
-                  const Divider(height: 32),
-                  Text(
-                    'Icona (si no hi ha foto)',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 60,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: eventIcons.entries.map((entry) {
-                        final bool isSelected = _selectedIconName == entry.key;
-                        return GestureDetector(
-                          onTap: () =>
-                              setState(() => _selectedIconName = entry.key),
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 6),
-                            width: 60,
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.surface,
-                              borderRadius: BorderRadius.circular(12),
-                              border: isSelected
-                                  ? Border.all(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.secondary,
-                                      width: 2,
-                                    )
-                                  : null,
-                            ),
-                            child: Icon(
-                              entry.value,
-                              color: isSelected
-                                  ? Colors.white
-                                  : Theme.of(context).colorScheme.onSurface,
-                              size: 30,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-
+                  const SizedBox(height: 40),
                   ElevatedButton(
                     onPressed: _saveEvent,
                     style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 52),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      backgroundColor: Theme.of(context).primaryColor,
+                      foregroundColor: Colors.white,
                     ),
-                    child: const Text(
-                      'Crear Esdeveniment',
-                      style: TextStyle(fontSize: 18),
-                    ),
+                    child: const Text('CREAR ESDEVENIMENT', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   ),
+                  const SizedBox(height: 40),
                 ],
               ),
             ),
+    );
+  }
+
+  // Selector simple de iconos
+  void _showIconPicker() {
+    // Lista completa de claves definidas en icon_helper.dart
+    final List<String> availableIcons = [
+      'default', 
+      'party', 'birthday', 'music', 'dance', 'beer', 'wine', // Social
+      'dinner', 'lunch', 'bbq', 'coffee', // Comida
+      'sports', 'gym', 'hiking', 'beach', 'travel', // Activos
+      'meeting', 'work', 'study', 'presentation', // Serios
+      'cinema', 'game', 'photography', 'shopping' // Hobbies
+    ]; 
+    
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          height: 400, // Un poco más alto para que quepan bien
+          child: Column(
+            children: [
+              const Text("Tria una icona", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              Expanded(
+                child: GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 5, // 5 iconos por fila
+                    crossAxisSpacing: 15, 
+                    mainAxisSpacing: 15
+                  ),
+                  itemCount: availableIcons.length,
+                  itemBuilder: (context, index) {
+                    final iconKey = availableIcons[index];
+                    return InkWell(
+                      onTap: () {
+                        setState(() => _selectedIconName = iconKey);
+                        Navigator.pop(context);
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: _selectedIconName == iconKey ? Theme.of(context).primaryColor.withOpacity(0.2) : Colors.grey[100],
+                          borderRadius: BorderRadius.circular(10),
+                          border: _selectedIconName == iconKey ? Border.all(color: Theme.of(context).primaryColor, width: 2) : null,
+                        ),
+                        child: Icon(
+                          getIconData(iconKey, type: 'event'), 
+                          size: 28, 
+                          color: Colors.black87
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

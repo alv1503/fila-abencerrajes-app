@@ -2,6 +2,7 @@
 import 'package:abenceapp/models/event_model.dart';
 import 'package:abenceapp/services/firestore_service.dart';
 import 'package:abenceapp/utils/icon_helper.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -15,7 +16,7 @@ class EditEventPage extends StatefulWidget {
 }
 
 class _EditEventPageState extends State<EditEventPage> {
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final _formKey = GlobalKey<FormState>();
   final FirestoreService _firestoreService = FirestoreService();
 
   late TextEditingController _titleController;
@@ -23,31 +24,32 @@ class _EditEventPageState extends State<EditEventPage> {
   late TextEditingController _locationController;
   late TextEditingController _dressCodeController;
 
-  final List<TextEditingController> _menuControllers = [];
-
-  DateTime? _startDate;
+  late DateTime _startDate;
   DateTime? _endDate;
-  String _selectedIconName = 'default';
+  final List<TextEditingController> _menuControllers = [];
+  
   bool _isLoading = false;
+  String _selectedIconName = 'default';
 
   @override
   void initState() {
     super.initState();
+    // Cargar datos existentes
     _titleController = TextEditingController(text: widget.event.title);
-    _descriptionController = TextEditingController(
-      text: widget.event.description,
-    );
+    _descriptionController = TextEditingController(text: widget.event.description);
     _locationController = TextEditingController(text: widget.event.location);
-    _dressCodeController = TextEditingController(
-      text: widget.event.dressCode ?? '',
-    );
-
+    _dressCodeController = TextEditingController(text: widget.event.dressCode ?? '');
+    
     _startDate = widget.event.date.toDate();
-    _endDate = widget.event.endDate?.toDate();
+    if (widget.event.endDate != null) {
+      _endDate = widget.event.endDate!.toDate();
+    }
+    
     _selectedIconName = widget.event.iconName ?? 'default';
 
-    for (String option in widget.event.menuOptions) {
-      _menuControllers.add(TextEditingController(text: option));
+    // Cargar menú
+    for (String op in widget.event.menuOptions) {
+      _menuControllers.add(TextEditingController(text: op));
     }
   }
 
@@ -57,16 +59,40 @@ class _EditEventPageState extends State<EditEventPage> {
     _descriptionController.dispose();
     _locationController.dispose();
     _dressCodeController.dispose();
-    for (var c in _menuControllers) {
-      c.dispose();
-    }
+    for (var c in _menuControllers) c.dispose();
     super.dispose();
   }
 
+  Future<void> _pickDateTime(bool isStart) async {
+    final initialDate = isStart ? _startDate : (_endDate ?? _startDate);
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+
+    if (pickedDate != null && mounted) {
+      final pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(initialDate),
+      );
+
+      if (pickedTime != null) {
+        final newDate = DateTime(
+          pickedDate.year, pickedDate.month, pickedDate.day,
+          pickedTime.hour, pickedTime.minute,
+        );
+        setState(() {
+          if (isStart) _startDate = newDate;
+          else _endDate = newDate;
+        });
+      }
+    }
+  }
+
   void _addMenuOption() {
-    setState(() {
-      _menuControllers.add(TextEditingController());
-    });
+    setState(() => _menuControllers.add(TextEditingController()));
   }
 
   void _removeMenuOption(int index) {
@@ -76,286 +102,219 @@ class _EditEventPageState extends State<EditEventPage> {
     });
   }
 
-  Future<void> _selectStartDate(BuildContext context) async {
-    final DateTime? pickedDate = await showDatePicker(
-      context: context,
-      initialDate: _startDate!,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (pickedDate == null) return;
-
-    final TimeOfDay? pickedTime = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(_startDate!),
-    );
-    if (pickedTime == null) return;
-
-    setState(() {
-      _startDate = DateTime(
-        pickedDate.year,
-        pickedDate.month,
-        pickedDate.day,
-        pickedTime.hour,
-        pickedTime.minute,
-      );
-      if (_endDate != null && _endDate!.isBefore(_startDate!)) _endDate = null;
-    });
-  }
-
-  Future<void> _selectEndDate(BuildContext context) async {
-    if (_startDate == null) return;
-    final DateTime? pickedDate = await showDatePicker(
-      context: context,
-      initialDate: _endDate ?? _startDate!,
-      firstDate: _startDate!,
-      lastDate: _startDate!.add(const Duration(days: 7)),
-    );
-    if (pickedDate == null) return;
-
-    final TimeOfDay? pickedTime = await showTimePicker(
-      context: context,
-      initialTime: _endDate != null
-          ? TimeOfDay.fromDateTime(_endDate!)
-          : TimeOfDay.fromDateTime(_startDate!.add(const Duration(hours: 2))),
-    );
-    if (pickedTime == null) return;
-
-    final tempEndDate = DateTime(
-      pickedDate.year,
-      pickedDate.month,
-      pickedDate.day,
-      pickedTime.hour,
-      pickedTime.minute,
-    );
-    if (tempEndDate.isBefore(_startDate!)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Data fi incorrecta.')));
-      return;
-    }
-    setState(() => _endDate = tempEndDate);
-  }
-
   Future<void> _saveChanges() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
-      final List<String> menuOptions = _menuControllers
+      List<String> menuOptions = _menuControllers
           .map((c) => c.text.trim())
-          .where((text) => text.isNotEmpty)
+          .where((t) => t.isNotEmpty)
           .toList();
 
-      await _firestoreService.updateEvent(
-        widget.event.id,
-        title: _titleController.text.trim(),
-        description: _descriptionController.text.trim(),
-        location: _locationController.text.trim(),
-        date: _startDate!,
-        iconName: _selectedIconName,
-        endDate: _endDate,
-        dressCode: _dressCodeController.text.trim().isEmpty
-            ? null
-            : _dressCodeController.text.trim(),
-        menuOptions: menuOptions,
-      );
+      await _firestoreService.events.doc(widget.event.id).update({
+        'title': _titleController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'location': _locationController.text.trim(),
+        'dressCode': _dressCodeController.text.trim(),
+        'date': Timestamp.fromDate(_startDate),
+        'endDate': _endDate != null ? Timestamp.fromDate(_endDate!) : null,
+        'menuOptions': menuOptions,
+        'iconName': _selectedIconName,
+      });
 
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Actualitzat!'),
-            backgroundColor: Colors.green,
-          ),
+          const SnackBar(content: Text('Canvis guardats correctament')),
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  String? _validateNotEmpty(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Camp obligatori';
-    return null;
+  // Selector de Iconos (Igual que en CreateEventPage)
+  void _showIconPicker() {
+    final List<String> availableIcons = [
+      'default', 'party', 'birthday', 'music', 'dance', 'beer', 'wine', 
+      'dinner', 'lunch', 'bbq', 'coffee', 
+      'sports', 'gym', 'hiking', 'beach', 'travel', 
+      'meeting', 'work', 'study', 'presentation',
+      'cinema', 'game', 'photography', 'shopping'
+    ]; 
+    
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          height: 400,
+          child: Column(
+            children: [
+              const Text("Tria una icona", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              Expanded(
+                child: GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 5, crossAxisSpacing: 15, mainAxisSpacing: 15
+                  ),
+                  itemCount: availableIcons.length,
+                  itemBuilder: (context, index) {
+                    final iconKey = availableIcons[index];
+                    return InkWell(
+                      onTap: () {
+                        setState(() => _selectedIconName = iconKey);
+                        Navigator.pop(context);
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: _selectedIconName == iconKey ? Theme.of(context).primaryColor.withOpacity(0.2) : Colors.grey[100],
+                          borderRadius: BorderRadius.circular(10),
+                          border: _selectedIconName == iconKey ? Border.all(color: Theme.of(context).primaryColor, width: 2) : null,
+                        ),
+                        child: Icon(getIconData(iconKey, type: 'event'), size: 28, color: Colors.black87),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
+
     return Scaffold(
       appBar: AppBar(title: const Text('Editar Esdeveniment')),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Form(
-              key: _formKey,
-              child: ListView(
-                padding: const EdgeInsets.all(16.0),
-                children: [
-                  TextFormField(
-                    controller: _titleController,
-                    // --- CANVI ---
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Títol',
-                      prefixIcon: Icon(Icons.title),
-                    ),
-                    validator: _validateNotEmpty,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _locationController,
-                    // --- CANVI ---
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Ubicació',
-                      prefixIcon: Icon(Icons.location_on_outlined),
-                    ),
-                    validator: _validateNotEmpty,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _dressCodeController,
-                    // --- CANVI ---
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Vestimenta',
-                      prefixIcon: Icon(Icons.checkroom),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _descriptionController,
-                    // --- CANVI ---
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Descripció',
-                      prefixIcon: Icon(Icons.description_outlined),
-                    ),
-                    maxLines: 3,
-                    validator: _validateNotEmpty,
-                  ),
-                  const SizedBox(height: 24),
-
-                  Row(
+        ? const Center(child: CircularProgressIndicator())
+        : Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // 1. Icono
+                Center(
+                  child: Column(
                     children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => _selectStartDate(context),
-                          child: Text(
-                            'INICI: ${DateFormat('dd/MM HH:mm').format(_startDate!)}',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => _selectEndDate(context),
-                          child: Text(
-                            'FI: ${_endDate == null ? 'Auto' : DateFormat('dd/MM HH:mm').format(_endDate!)}',
+                      const Text("Icona", style: TextStyle(color: Colors.grey)),
+                      const SizedBox(height: 10),
+                      InkWell(
+                        onTap: _showIconPicker,
+                        child: CircleAvatar(
+                          radius: 40,
+                          backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+                          child: Icon(
+                            getIconData(_selectedIconName, type: 'event'),
+                            size: 40,
+                            color: Theme.of(context).primaryColor,
                           ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
+                ),
+                const SizedBox(height: 20),
 
-                  const Text(
-                    'Opcions de Menú',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                TextFormField(
+                  controller: _titleController,
+                  decoration: const InputDecoration(labelText: 'Títol', border: OutlineInputBorder()),
+                  validator: (v) => v!.isEmpty ? 'Necessari' : null,
+                ),
+                const SizedBox(height: 15),
+
+                TextFormField(
+                  controller: _locationController,
+                  decoration: const InputDecoration(labelText: 'Ubicació', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 15),
+
+                // Fechas
+                Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => _pickDateTime(true),
+                          child: InputDecorator(
+                            decoration: const InputDecoration(labelText: 'Inici', border: OutlineInputBorder(), prefixIcon: Icon(Icons.calendar_today)),
+                            child: Text(dateFormat.format(_startDate)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => _pickDateTime(false),
+                          child: InputDecorator(
+                            decoration: const InputDecoration(labelText: 'Final', border: OutlineInputBorder()),
+                            child: Text(_endDate != null ? dateFormat.format(_endDate!) : '-'),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  ..._menuControllers.asMap().entries.map((entry) {
-                    return Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: entry.value,
-                            // --- CANVI ---
-                            textCapitalization: TextCapitalization.sentences,
+                  const SizedBox(height: 15),
+
+                TextFormField(
+                  controller: _descriptionController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(labelText: 'Descripció', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 15),
+                 TextFormField(
+                  controller: _dressCodeController,
+                  decoration: const InputDecoration(labelText: 'Dress Code', border: OutlineInputBorder()),
+                ),
+
+                const SizedBox(height: 30),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Menú', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    IconButton(onPressed: _addMenuOption, icon: const Icon(Icons.add_circle, color: Colors.green)),
+                  ],
+                ),
+                ..._menuControllers.asMap().entries.map((entry) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: entry.value,
+                              decoration: InputDecoration(labelText: 'Opció ${entry.key + 1}', border: const OutlineInputBorder()),
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.remove_circle_outline,
-                            color: Colors.red,
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _removeMenuOption(entry.key),
                           ),
-                          onPressed: () => _removeMenuOption(entry.key),
-                        ),
-                      ],
+                        ],
+                      ),
                     );
                   }),
-                  TextButton.icon(
-                    onPressed: _addMenuOption,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Afegir Opció'),
-                  ),
 
-                  const SizedBox(height: 32),
-
-                  SizedBox(
-                    height: 60,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: eventIcons.entries.map((entry) {
-                        final bool isSelected = _selectedIconName == entry.key;
-                        return GestureDetector(
-                          onTap: () =>
-                              setState(() => _selectedIconName = entry.key),
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 6),
-                            width: 60,
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.surface,
-                              borderRadius: BorderRadius.circular(12),
-                              border: isSelected
-                                  ? Border.all(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.secondary,
-                                      width: 2,
-                                    )
-                                  : null,
-                            ),
-                            child: Icon(
-                              entry.value,
-                              color: isSelected
-                                  ? Colors.white
-                                  : Theme.of(context).colorScheme.onSurface,
-                              size: 30,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
+                const SizedBox(height: 40),
+                ElevatedButton(
+                  onPressed: _saveChanges,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 15)
                   ),
-                  const SizedBox(height: 32),
-
-                  ElevatedButton(
-                    onPressed: _saveChanges,
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 52),
-                    ),
-                    child: const Text(
-                      'Guardar Canvis',
-                      style: TextStyle(fontSize: 18),
-                    ),
-                  ),
-                ],
-              ),
+                  child: const Text('GUARDAR CANVIS'),
+                ),
+              ],
             ),
+          ),
     );
   }
 }

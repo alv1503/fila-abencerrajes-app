@@ -1,152 +1,88 @@
 // lib/services/excel_service.dart
+
 import 'dart:io';
 import 'package:abenceapp/models/event_model.dart';
+import 'package:abenceapp/models/order_sheet_model.dart'; // Asegúrate de tener este import
 import 'package:excel/excel.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:abenceapp/models/order_sheet_model.dart';
 
 class ExcelService {
-  // --- EXPORTAR CENSO COMPLET (Tots els membres) ---
-  Future<void> exportMemberCensus(
-    List<QueryDocumentSnapshot> membersDocs,
-  ) async {
-    // 1. Crear l'Excel
-    var excel = Excel.createExcel();
-
-    // Renombrar la fulla per defecte
-    Sheet sheet = excel['Sheet1'];
-    excel.rename('Sheet1', 'Cens Membres');
-    sheet = excel['Cens Membres'];
-
-    // 2. Crear Encapçalaments (Negreta)
-    List<String> headers = [
-      'Mote',
-      'Nom',
-      'Cognoms',
-      'DNI',
-      'Telèfon',
-      'Email',
-      'Rol',
-      'Data Naixement',
-    ];
-    // Estil de capçalera (opcional, la llibreria excel a vegades canvia la API d'estils, ho fem simple)
-    sheet.appendRow(headers.map((e) => TextCellValue(e)).toList());
-
-    // 3. Omplir Dades
-    for (var doc in membersDocs) {
-      Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-
-      // Calculem el rol basant-nos en la lògica (o si ho tens guardat)
-      String role = "Membre";
-      if (data['isSenior'] == true) role = "Senior";
-      // ... pots afegir més lògica si vols
-
-      String birthDate = '';
-      if (data['dataNaixement'] != null) {
-        birthDate = DateFormat(
-          'dd/MM/yyyy',
-        ).format((data['dataNaixement'] as Timestamp).toDate());
-      }
-
-      List<CellValue> row = [
-        TextCellValue(data['mote'] ?? ''),
-        TextCellValue(data['nom'] ?? ''),
-        TextCellValue(data['cognoms'] ?? ''),
-        TextCellValue(data['dni'] ?? ''),
-        TextCellValue(data['telefon'] ?? ''),
-        TextCellValue(data['email'] ?? ''),
-        TextCellValue(role),
-        TextCellValue(birthDate),
-      ];
-
-      sheet.appendRow(row);
+  
+  // --- MÉTODO AUXILIAR PARA COMPARTIR SIN ERRORES ---
+  Future<void> _safeShare(String path, String text) async {
+    try {
+      final file = XFile(path);
+      await Share.shareXFiles([file], text: text);
+    } catch (e) {
+      print("Aviso: El usuario canceló o hubo un error menor al compartir: $e");
     }
-
-    // 4. Guardar i Compartir
-    await _saveAndShareFile(
-      excel,
-      "Cens_Filà_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx",
-    );
   }
 
-  // --- EXPORTAR ASSISTENTS D'UN EVENT ---
+  // --- 1. EXPORTAR ASISTENTES DE UN EVENTO ---
   Future<void> exportEventAttendees(EventModel event) async {
     var excel = Excel.createExcel();
     Sheet sheet = excel['Sheet1'];
     excel.rename('Sheet1', 'Assistents');
     sheet = excel['Assistents'];
 
-    // Encapçalaments
+    sheet.appendRow([TextCellValue(event.title)]);
+    sheet.appendRow([TextCellValue("Data: ${DateFormat('dd/MM/yyyy HH:mm').format(event.date.toDate())}")]);
+    sheet.appendRow([TextCellValue("")]); 
+
     sheet.appendRow([
-      TextCellValue('Mote / Nom'),
-      TextCellValue('Tipus'), // Membre o Convidat
-      TextCellValue('Opció Menú'),
-      TextCellValue('Convidat Per'),
+      TextCellValue("Nom / Mote"),
+      TextCellValue("Tipus"),
+      TextCellValue("Opció Menú"),
+      TextCellValue("Convidat per"),
     ]);
 
-    // 1. Afegir Membres
     for (var attendee in event.attendees) {
-      sheet.appendRow([
-        TextCellValue(attendee['mote'] ?? 'Desconegut'),
-        TextCellValue('Membre'),
-        TextCellValue(attendee['selection'] ?? 'Sense Opció'),
-        TextCellValue('-'), // No és convidat per ningú
-      ]);
+      if (attendee is Map) {
+        sheet.appendRow([
+          TextCellValue(attendee['mote'] ?? 'Soci'),
+          TextCellValue("Soci"),
+          TextCellValue(attendee['selection'] ?? '-'),
+          TextCellValue("-"),
+        ]);
+      }
     }
 
-    // 2. Afegir Convidats Manuals
     for (var guest in event.manualGuests) {
-      sheet.appendRow([
-        TextCellValue(guest['name'] ?? 'Convidat'),
-        TextCellValue('Convidat Extern'),
-        TextCellValue(guest['selection'] ?? 'Sense Opció'),
-        TextCellValue(guest['addedByMote'] ?? 'Admin'),
-      ]);
+      if (guest is Map) {
+        sheet.appendRow([
+          TextCellValue(guest['name'] ?? 'Convidat'),
+          TextCellValue("Convidat"),
+          TextCellValue(guest['selection'] ?? '-'),
+          TextCellValue(guest['addedByMote'] ?? 'Desconegut'),
+        ]);
+      }
     }
 
-    String safeTitle = event.title.replaceAll(
-      RegExp(r'[^\w\s]+'),
-      '',
-    ); // Llevar caràcters rars
-    await _saveAndShareFile(
-      excel,
-      "Llista_${safeTitle}_${DateFormat('yyyyMMdd').format(event.date.toDate())}.xlsx",
-    );
-  }
-
-  // --- FUNCIÓ INTERNA PER A GUARDAR I OBRIR ---
-  Future<void> _saveAndShareFile(Excel excel, String fileName) async {
-    // Codificar l'excel a bytes
-    var fileBytes = excel.save();
+    final fileBytes = excel.save();
     if (fileBytes == null) return;
 
-    // Buscar directori temporal
     final directory = await getTemporaryDirectory();
-    final path = "${directory.path}/$fileName";
+    final cleanTitle = event.title.replaceAll(RegExp(r'[^\w\s]+'), '');
+    final path = "${directory.path}/Assistents_$cleanTitle.xlsx";
 
-    // Crear el fitxer real
     File(path)
       ..createSync(recursive: true)
       ..writeAsBytesSync(fileBytes);
 
-    // Obrir el menú de compartir
-    // XFiles és el format nou de share_plus
-    await Share.shareXFiles([
-      XFile(path),
-    ], text: 'Aquí tens l\'arxiu Excel exportat.');
+    await _safeShare(path, "Llista d'assistents per: ${event.title}");
   }
 
-  // --- EXPORTAR FULL DE COMANDA (ENCÀRRECS) ---
+  // --- 2. EXPORTAR PEDIDOS (ORDER SHEETS) - LA QUE FALTABA ---
   Future<void> exportOrderSheet(OrderSheetModel sheet) async {
     var excel = Excel.createExcel();
     Sheet s = excel['Sheet1'];
     excel.rename('Sheet1', 'Comanda');
     s = excel['Comanda'];
 
-    // Títol i Descripció
+    // Título y Descripción
     s.appendRow([TextCellValue(sheet.title)]);
     s.appendRow([TextCellValue(sheet.description)]);
     s.appendRow([
@@ -154,27 +90,71 @@ class ExcelService {
         "Data límit: ${DateFormat('dd/MM/yyyy').format(sheet.deadline.toDate())}",
       ),
     ]);
-    s.appendRow([TextCellValue("")]); // Espai buit
+    s.appendRow([TextCellValue("")]);
 
-    // Encapçalaments
+    // Encabezados
     s.appendRow([
       TextCellValue('Soci (Mote)'),
       TextCellValue('Detall de la Comanda'),
       TextCellValue('Data Apuntat'),
     ]);
 
-    // Dades
+    // Datos
     for (var item in sheet.items) {
       s.appendRow([
         TextCellValue(item.mote),
         TextCellValue(item.orderText),
-        TextCellValue(
-          DateFormat('dd/MM HH:mm').format(item.timestamp.toDate()),
-        ),
+        TextCellValue(DateFormat('dd/MM HH:mm').format(item.timestamp.toDate())),
       ]);
     }
 
-    String safeTitle = sheet.title.replaceAll(RegExp(r'[^\w\s]+'), '');
-    await _saveAndShareFile(excel, "Comanda_$safeTitle.xlsx");
+    final fileBytes = excel.save();
+    if (fileBytes == null) return;
+
+    final directory = await getTemporaryDirectory();
+    final cleanTitle = sheet.title.replaceAll(RegExp(r'[^\w\s]+'), '');
+    final path = "${directory.path}/Comanda_$cleanTitle.xlsx";
+
+    File(path)
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(fileBytes);
+
+    await _safeShare(path, "Full de comanda: ${sheet.title}");
+  }
+
+  // --- 3. EXPORTAR CENSO (COMPATIBILIDAD) ---
+  Future<void> exportMemberCensus(List<QueryDocumentSnapshot> membersDocs) async {
+    var excel = Excel.createExcel();
+    Sheet sheet = excel['Sheet1'];
+    excel.rename('Sheet1', 'Cens Membres');
+    sheet = excel['Cens Membres'];
+
+    List<String> headers = ['Mote', 'Nom', 'Cognoms', 'DNI', 'Telèfon', 'Email', 'Rol'];
+    sheet.appendRow(headers.map((e) => TextCellValue(e)).toList());
+
+    for (var doc in membersDocs) {
+      Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+      sheet.appendRow([
+        TextCellValue(data['mote'] ?? ''),
+        TextCellValue(data['nom'] ?? ''),
+        TextCellValue(data['cognoms'] ?? ''),
+        TextCellValue(data['dni'] ?? ''),
+        TextCellValue(data['telefon'] ?? ''),
+        TextCellValue(data['email'] ?? ''),
+        TextCellValue(data['isAdmin'] == true ? 'Admin' : 'Soci'),
+      ]);
+    }
+
+    final fileBytes = excel.save();
+    if (fileBytes == null) return;
+
+    final directory = await getTemporaryDirectory();
+    final path = "${directory.path}/Cens_Complet.xlsx";
+
+    File(path)
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(fileBytes);
+
+    await _safeShare(path, "Cens de socis exportat.");
   }
 }

@@ -30,7 +30,6 @@ class _EventsPageState extends State<EventsPage> {
     _loadAdminStatus();
   }
 
-  // Mantenim açò per al botó d'historial (opcional)
   Future<void> _loadAdminStatus() async {
     final User? currentUser = _auth.currentUser;
     if (currentUser == null) return;
@@ -39,17 +38,15 @@ class _EventsPageState extends State<EventsPage> {
           .collection('membres')
           .doc(currentUser.uid)
           .get();
-
-      if (userDoc.exists) {
-        final MemberModel member = MemberModel.fromJson(userDoc);
-        if (mounted) {
-          setState(() {
-            _isAdmin = member.isAdmin;
-          });
-        }
+          
+      if (userDoc.exists && mounted) {
+        final data = userDoc.data() as Map<String, dynamic>;
+        setState(() {
+          _isAdmin = data['isAdmin'] == true;
+        });
       }
     } catch (e) {
-      print("Error carregant status d'admin: $e");
+      debugPrint("Error loading admin status: $e");
     }
   }
 
@@ -57,84 +54,108 @@ class _EventsPageState extends State<EventsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Esdeveniments'),
+        title: const Text('Pròxims Esdeveniments'),
         actions: [
-          // L'historial el mantenim només per a admins?
-          // Si vols que el veja tothom, lleva el "if (_isAdmin)"
-          if (_isAdmin)
-            IconButton(
-              icon: const Icon(Icons.archive),
-              tooltip: 'Esdeveniments Passats',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const PastEventsPage(),
-                  ),
-                );
-              },
-            ),
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Esdeveniments Passats',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const PastEventsPage(),
+                ),
+              );
+            },
+          ),
         ],
       ),
-      body: StreamBuilder<List<EventModel>>(
-        stream: _firestoreService.getFutureEvents(),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: _firestoreService.getEventsStream(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          // 1. Errores de conexión o Firestore
           if (snapshot.hasError) {
-            return const Center(child: Text('Error carregant esdeveniments'));
-          }
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.event_busy, size: 60, color: Colors.grey),
-                  SizedBox(height: 10),
-                  Text(
-                    'No hi ha esdeveniments propers',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ],
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Text('Error carregant esdeveniments: ${snapshot.error}'),
               ),
             );
           }
 
-          final events = snapshot.data!;
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text('No hi ha esdeveniments programats.'));
+          }
+
+          // 2. Filtrado Lógico (Cliente)
+          // Mostramos eventos futuros + los que han empezado hace menos de 4 horas (para que no desaparezcan durante el evento)
+          final now = DateTime.now().subtract(const Duration(hours: 4));
+
+          final List<EventModel> events = snapshot.data!.docs
+              .map((doc) => EventModel.fromJson(doc))
+              .where((event) => event.date.toDate().isAfter(now))
+              .toList();
+
+          // 3. Ordenación (El más cercano primero)
+          events.sort((a, b) => a.date.compareTo(b.date));
+
+          if (events.isEmpty) {
+            return const Center(
+              child: Text(
+                'No hi ha esdeveniments propers.\nMira l\'historial per veure els passats.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey),
+              ),
+            );
+          }
+
+          // 4. Lista Visual
           return ListView.builder(
             itemCount: events.length,
+            padding: const EdgeInsets.all(10),
             itemBuilder: (context, index) {
               final event = events[index];
-              final formattedDate = DateFormat(
-                'dd/MM/yyyy HH:mm',
+              final String formattedDate = DateFormat(
+                'd MMMM - HH:mm',
                 'ca',
               ).format(event.date.toDate());
 
               return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                elevation: 3,
+                margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 child: ListTile(
+                  contentPadding: const EdgeInsets.all(15),
                   leading: CircleAvatar(
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    backgroundImage:
-                        (event.imageUrl != null && event.imageUrl!.isNotEmpty)
-                        ? NetworkImage(event.imageUrl!)
-                        : null,
-                    child: (event.imageUrl == null || event.imageUrl!.isEmpty)
-                        ? Icon(
-                            getIconData(event.iconName, type: 'event'),
-                            color: Colors.white,
-                          )
-                        : null,
+                    radius: 25,
+                    backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+                    child: Icon(
+                      getIconData(event.iconName, type: 'event'),
+                      color: Theme.of(context).primaryColor,
+                      size: 28,
+                    ),
                   ),
                   title: Text(
                     event.title,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
-                  subtitle: Text('${event.location}\n$formattedDate'),
-                  isThreeLine: true,
-                  trailing: const Icon(Icons.chevron_right),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 5),
+                    child: Row(
+                      children: [
+                        Icon(Icons.access_time, size: 14, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text(formattedDate, style: TextStyle(color: Colors.grey[800])),
+                      ],
+                    ),
+                  ),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
                   onTap: () {
                     Navigator.push(
                       context,
@@ -150,8 +171,10 @@ class _EventsPageState extends State<EventsPage> {
         },
       ),
 
-      // --- CAMBIO AQUÍ: Botón visible para TODOS ---
+      // Botón visible para todos (o solo admin, según prefieras)
       floatingActionButton: FloatingActionButton(
+        backgroundColor: Theme.of(context).primaryColor,
+        foregroundColor: Colors.white,
         onPressed: () {
           Navigator.push(
             context,

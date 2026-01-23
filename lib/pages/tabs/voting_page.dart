@@ -109,7 +109,21 @@ class _VotingPageState extends State<VotingPage> {
                 if (snapshot.hasError) {
                   return Center(child: Text('Error: ${snapshot.error}'));
                 }
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                
+                // FILTRO DE FECHAS APLICADO AQUÍ
+                final now = DateTime.now();
+                
+                // 1. Convertimos a lista de modelos
+                // 2. Filtramos solo las futuras (isAfter now)
+                final List<VotingModel> votings = snapshot.data?.docs
+                    .map((doc) => VotingModel.fromJson(doc))
+                    .where((v) => v.endDate.toDate().isAfter(now))
+                    .toList() ?? [];
+
+                // 3. Ordenamos: las que caducan antes, salen primero
+                votings.sort((a, b) => a.endDate.compareTo(b.endDate));
+
+                if (votings.isEmpty) {
                   return const Center(
                     child: Padding(
                       padding: EdgeInsets.all(16.0),
@@ -121,10 +135,6 @@ class _VotingPageState extends State<VotingPage> {
                     ),
                   );
                 }
-
-                final List<VotingModel> votings = snapshot.data!.docs
-                    .map((doc) => VotingModel.fromJson(doc))
-                    .toList();
 
                 return ListView.builder(
                   padding: const EdgeInsets.symmetric(
@@ -154,7 +164,7 @@ class _VotingPageState extends State<VotingPage> {
                         leading: CircleAvatar(
                           backgroundColor: Theme.of(
                             context,
-                          ).colorScheme.primary,
+                          ).colorScheme.primary.withOpacity(0.1),
                           backgroundImage:
                               (voting.imageUrl != null &&
                                   voting.imageUrl!.isNotEmpty)
@@ -165,7 +175,7 @@ class _VotingPageState extends State<VotingPage> {
                                   voting.imageUrl!.isEmpty)
                               ? Icon(
                                   getIconData(voting.iconName, type: 'voting'),
-                                  color: Colors.white,
+                                  color: Theme.of(context).primaryColor,
                                 )
                               : null,
                         ),

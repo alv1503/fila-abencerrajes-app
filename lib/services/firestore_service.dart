@@ -168,6 +168,32 @@ class FirestoreService {
   // 2. EVENTOS
   // ===========================================================================
 
+  // AÑADIR DENTRO DE lib/services/firestore_service.dart
+
+  // --- GESTIÓN DE INVITADOS MANUALES ---
+
+  // Añadir un invitado manual (Ahora con opción de menú)
+  Future<void> addManualGuest(String eventId, String guestName, String hostUid, String hostMote, {String? selection}) async {
+    final guestData = {
+      'name': guestName,
+      'addedBy': hostUid,
+      'addedByMote': hostMote,
+      'selection': selection, // Guardamos el menú elegido
+      'timestamp': Timestamp.now(),
+    };
+
+    await events.doc(eventId).update({
+      'manualGuests': FieldValue.arrayUnion([guestData]),
+    });
+  }
+
+  // Eliminar un invitado manual (debe coincidir exactamente el objeto)
+  Future<void> removeManualGuest(String eventId, Map<String, dynamic> guestData) async {
+    await events.doc(eventId).update({
+      'manualGuests': FieldValue.arrayRemove([guestData]),
+    });
+  }
+
   Stream<List<EventModel>> getFutureEvents() {
     return events
         .where('date', isGreaterThanOrEqualTo: Timestamp.now())
@@ -191,24 +217,31 @@ class FirestoreService {
         .snapshots();
   }
 
-  Future<void> addEvent(
-    String title,
-    String description,
-    String location,
-    DateTime date, {
-    String? iconName,
+  // --- CREAR ESDEVENIMENT (SIMPLIFICADO) ---
+  Future<void> createEvent({
+    required String title,
+    required String description,
+    required String location,
+    required DateTime date,
     DateTime? endDate,
     String? dressCode,
-    List<String>? menuOptions,
-    String? imageUrl,
-    String? attachedFileUrl,
+    List<String> menuOptions = const [],
+    String? iconName,
+    // Mantenemos estos argumentos como opcionales por compatibilidad, pero no los usamos
+    dynamic imageFile, 
+    dynamic attachedFile, 
     String? attachedFileName,
   }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    // Obtenemos el mote del creador
+    DocumentSnapshot userDoc = await members.doc(user.uid).get();
     String creatorMote = '';
-    try {
-      DocumentSnapshot userDoc = await members.doc(_currentUser!.uid).get();
-      if (userDoc.exists) creatorMote = userDoc['mote'] ?? '';
-    } catch (_) {}
+    if (userDoc.exists) {
+      Map<String, dynamic> data = userDoc.data() as Map<String, dynamic>;
+      creatorMote = data['mote'] ?? data['nom'] ?? '';
+    }
 
     await events.add({
       'title': title,
@@ -216,18 +249,16 @@ class FirestoreService {
       'location': location,
       'date': Timestamp.fromDate(date),
       'endDate': endDate != null ? Timestamp.fromDate(endDate) : null,
-      'iconName': iconName ?? 'event',
       'dressCode': dressCode,
-      'menuOptions': menuOptions ?? [],
-      'imageUrl': imageUrl,
-      'attachedFileUrl': attachedFileUrl,
-      'attachedFileName': attachedFileName,
-      'creatorId': _currentUser?.uid,
+      'menuOptions': menuOptions,
+      'iconName': iconName,
+      'creatorId': user.uid,
       'creatorMote': creatorMote,
       'attendees': [],
       'manualGuests': [],
-      'confirmedAttendeesUids': [],
-      'confirmedManualGuests': [],
+      'imageUrl': null, // Ya no subimos imagen
+      'attachedFileUrl': null, // Ya no subimos PDF
+      'attachedFileName': null,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
@@ -260,25 +291,59 @@ class FirestoreService {
     }
   }
 
-  Future<void> deleteEvent(String id) async {
-    await events.doc(id).delete();
-  }
-
   Future<void> joinEvent(String eventId, {String? selection}) async {
-    Map<String, dynamic> updateData = {
-      'attendees': FieldValue.arrayUnion([_currentUser!.uid]),
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    // 1. Obtenemos datos actuales del socio para guardar su 'Snapshot'
+    DocumentSnapshot memberDoc = await members.doc(user.uid).get();
+    Map<String, dynamic> memberData = memberDoc.data() as Map<String, dynamic>;
+    
+    String myMote = memberData['mote'] ?? memberData['nom'] ?? 'Soci';
+    String? myPhoto = memberData['fotoUrl'];
+
+    // 2. Creamos el objeto de asistencia
+    final newAttendee = {
+      'uid': user.uid,
+      'mote': myMote,
+      'fotoUrl': myPhoto, // Guardamos foto para que salga en la lista
+      'selection': selection, // Menú elegido (si hay)
+      'timestamp': Timestamp.now(),
     };
-    if (selection != null) {
-      updateData['menuSelections.${_currentUser!.uid}'] = selection;
-    }
-    await events.doc(eventId).update(updateData);
+
+    // 3. Usamos arrayUnion para añadirlo sin borrar a los demás
+    await events.doc(eventId).update({
+      'attendees': FieldValue.arrayUnion([newAttendee])
+    });
   }
 
+  // Desapuntarse (Método seguro: Filtramos por UID)
   Future<void> leaveEvent(String eventId) async {
-    await events.doc(eventId).update({
-      'attendees': FieldValue.arrayRemove([_currentUser!.uid]),
-      'menuSelections.${_currentUser!.uid}': FieldValue.delete(),
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    final docRef = events.doc(eventId);
+    
+    // Transacción para asegurar que no borramos a otro si entran a la vez
+    await _db.runTransaction((transaction) async {
+      DocumentSnapshot snapshot = await transaction.get(docRef);
+      if (!snapshot.exists) return;
+
+      List<dynamic> currentAttendees = snapshot.get('attendees') ?? [];
+      
+      // Filtramos la lista: Nos quedamos con todos MENOS yo
+      List<dynamic> updatedAttendees = currentAttendees.where((a) {
+        if (a is Map && a['uid'] == user.uid) return false; // Borrarme a mí
+        return true; // Mantener al resto
+      }).toList();
+
+      transaction.update(docRef, {'attendees': updatedAttendees});
     });
+  }
+
+  // Borrar un evento
+  Future<void> deleteEvent(String eventId) async {
+    await events.doc(eventId).delete();
   }
 
   Future<void> joinEventForChild(
@@ -316,39 +381,6 @@ class FirestoreService {
       'attendees': FieldValue.arrayRemove([childUid]),
       'menuSelections.$childUid': FieldValue.delete(),
     });
-  }
-
-  // --- SOLUCIÓN: addManualGuest CON selection ---
-  Future<void> addManualGuest(
-    String eventId,
-    String guestName, {
-    String? selection,
-  }) async {
-    Map<String, dynamic> updateData = {
-      'manualGuests': FieldValue.arrayUnion([guestName]),
-    };
-    // Si se pasa una selección de menú, la guardamos.
-    // Usamos el nombre del invitado como clave (menuSelections.Pepito)
-    if (selection != null) {
-      updateData['menuSelections.$guestName'] = selection;
-    }
-    await events.doc(eventId).update(updateData);
-  }
-
-  Future<void> removeManualGuest(String eventId, dynamic guest) async {
-    String guestName;
-    if (guest is Map)
-      guestName = guest['name'] ?? guest['nom'] ?? '';
-    else
-      guestName = guest.toString();
-
-    if (guestName.isNotEmpty) {
-      await events.doc(eventId).update({
-        'manualGuests': FieldValue.arrayRemove([guestName]),
-        'menuSelections.$guestName':
-            FieldValue.delete(), // Limpiamos su menú también
-      });
-    }
   }
 
   Future<void> removeAttendee(String eventId, dynamic participant) async {
@@ -470,6 +502,12 @@ class FirestoreService {
     });
   }
 
+  // --- OBTENER EVENTOS (STREAM) ---
+  Stream<QuerySnapshot> getEventsStream() {
+    // Devuelve todos los eventos ordenados por fecha
+    return events.orderBy('date', descending: false).snapshots();
+  }
+  
   // Afegeix aquesta funció dins de FirestoreService
   Stream<QuerySnapshot> getEventsListStream() {
     return events.orderBy('date', descending: false).snapshots();

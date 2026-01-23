@@ -1,43 +1,56 @@
 // lib/utils/icon_helper.dart
 import 'package:flutter/material.dart';
 
-/// Aquest arxiu defineix els mapes d'icones i proporciona una funció
-/// d'ajuda per a obtindre la icona correcta basada en un nom.
-/// Això evita haver de repetir la lògica "if/else" o "switch"
-/// en múltiples pantalles.
+// CAMBIO: Ahora aceptamos "String?" (con interrogante) para que no falle si es nulo
+IconData getIconData(String? name, {String type = 'event'}) {
+  // Si es nulo o vacío, devolvemos el icono por defecto según el tipo
+  if (name == null || name.isEmpty) {
+    return type == 'voting' ? Icons.how_to_vote : Icons.event;
+  }
 
-// 1. Mapes d'Icones d'Esdeveniments
-/// Associa un nom de cadena (guardat a Firestore) amb un [IconData] real.
-final Map<String, IconData> eventIcons = {
-  'default': Icons.calendar_today,
-  'reunion': Icons.people,
-  'comida': Icons.restaurant,
-  'fiesta': Icons.celebration,
-  'musica': Icons.music_note,
-};
+  switch (name) {
+    // --- SOCIAL & FIESTA ---
+    case 'party': return Icons.celebration;
+    case 'birthday': return Icons.cake;
+    case 'music': return Icons.music_note;
+    case 'dance': return Icons.nightlife;
+    case 'beer': return Icons.sports_bar;
+    case 'wine': return Icons.wine_bar;
 
-// 2. Mapes d'Icones de Votacions
-/// Associa un nom de cadena amb un [IconData] per a les votacions.
-final Map<String, IconData> votingIcons = {
-  'default': Icons.how_to_vote,
-  'cargo': Icons.person,
-  'dinero': Icons.euro,
-  'general': Icons.gavel,
-  'idea': Icons.lightbulb,
-};
+    // --- COMIDA ---
+    case 'dinner': return Icons.restaurant;
+    case 'lunch': return Icons.restaurant_menu;
+    case 'bbq': return Icons.outdoor_grill;
+    case 'coffee': return Icons.local_cafe;
 
-// 3. Funció d'ajuda principal
-/// Retorna el [IconData] correcte basat en el [iconName] (String)
-/// rebut des de Firestore.
-///
-/// [type] (tipus) s'utilitza per a saber en quin mapa buscar ('event' o 'voting').
-IconData getIconData(String? iconName, {String type = 'event'}) {
-  if (type == 'event') {
-    // Busca l'iconName al mapa d'esdeveniments.
-    // Si no el troba (o si iconName és nul), retorna la icona 'default'.
-    return eventIcons[iconName] ?? eventIcons['default']!;
-  } else {
-    // Busca l'iconName al mapa de votacions.
-    return votingIcons[iconName] ?? votingIcons['default']!;
+    // --- DEPORTES & AIRE LIBRE ---
+    case 'sports': return Icons.sports_soccer;
+    case 'gym': return Icons.fitness_center;
+    case 'hiking': return Icons.hiking;
+    case 'beach': return Icons.beach_access;
+    case 'travel': return Icons.flight_takeoff;
+    
+    // --- REUNIONES & SERIO ---
+    case 'meeting': return Icons.groups;
+    case 'work': return Icons.work;
+    case 'study': return Icons.menu_book;
+    case 'presentation': return Icons.co_present;
+
+    // --- VOTACIONES ---
+    case 'vote_yesno': return Icons.thumbs_up_down;
+    case 'vote_check': return Icons.check_circle_outline;
+    case 'vote_star': return Icons.star_border;
+    case 'vote_poll': return Icons.poll;
+
+    // --- OTROS ---
+    case 'cinema': return Icons.movie;
+    case 'game': return Icons.sports_esports;
+    case 'photography': return Icons.camera_alt;
+    case 'shopping': return Icons.shopping_bag;
+    
+    // --- POR DEFECTO ---
+    case 'default':
+    default:
+      return type == 'voting' ? Icons.how_to_vote : Icons.event;
   }
 }
